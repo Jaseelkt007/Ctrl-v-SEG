@@ -1,0 +1,65 @@
+seed: 0
+run_name: kitti360_bbox_gen  # Change this for each run (or reuse to start from checkpoint)
+wandb_track: False
+log_every_n_steps: 5
+accelerator: auto  # Device for training (used by pytorch_lightning)
+num_devices: 1  # Number of devices to use for training (NOTE: multi-gpu training not supported yet)
+max_steps: 70000
+lr_warmup_steps: 500
+val_freq: 1  # Check val every x epochs
+train_batch_size: 2 
+val_batch_size: 2
+train_data_fraction: 1.0
+val_data_fraction: 0.25
+precision: 32-true # bf16-mixed for bfloat16 mixed precision or 32-true for regular
+gradient_clip_val: 1.0
+lr: 5e-4
+weight_decay: 1e-4
+data_root: /no_backups/s1492/Ctrl-V/kitti_preprocessed_ctrlv  # Path to your preprocessed KITTI360 dataset
+dataset: kitti360_preprocessed  # Use the new dataset
+dataloader_workers: 2
+save_top_k_checkpoints: 7
+dataset_non_overlapping: False
+smooth_gt_leaving_frame: False
+pred_coords: False  # Predict bbox coordinates instead of displacements
+overfitting_test: False
+regression: False
+
+# Conditioning
+condition_last_frame: True
+initial_frames_condition_num: 3  # Number of initial frames to condition on
+only_keep_initial_agents: True
+always_predict_initial_agents: False
+use_state_embeddings: True
+map_embedding: True
+last_frame_traj: False
+
+# Transformer model config
+state_dim: 4  # {x1, y1, x2, y2}
+hidden_dim: 256
+dim_feedforward: 1024
+num_heads: 8
+num_decoder_layers: 4
+num_encoder_layers: 2
+dir_disc: 24  # Discretization resolution
+norm_disc: 16 # Discretization resolution
+vocabulary_size: 384 # This value will be updated automatically according to the two above (dir_disc * norm_disc)
+existence_head: False
+existence_loss_weight: 1.0
+coords_loss_weight: 1.0
+
+num_timesteps: 8  # Number of frames per clip - match your preprocessed clip length!
+max_num_agents: 15  # Maximum number of objects per frame
+video_fps: 10  # KITTI360 original fps
+num_demo_samples: 1
+train_W: 512
+train_H: 320  # Adjust based on your target training resolution
+
+action_temp: 1.0  # Temperature for sampling
+model_path: null  # Path to checkpoint for evaluation/inference
+disable_image_load: False
+load_bbox_image: False  # Set to True if you want to use preplotted bbox images
+num_eval_samples: 1
+teacher_force_eval: False
+eval_videos_every: -1
+shuffle_dataset: False

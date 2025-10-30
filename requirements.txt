@@ -1,0 +1,49 @@
+# Core dependencies - install these first
+numpy==1.24.4
+packaging==23.2
+setuptools==69.5.1
+
+# PyTorch - install separately with CUDA
+# torch==2.3.0
+# torchvision==0.18.0
+
+# Deep learning frameworks
+accelerate==0.30.0
+diffusers==0.27.2
+transformers==4.40.0
+peft==0.10.0
+pytorch_lightning==2.2.0
+
+# Hugging Face ecosystem
+huggingface-hub==0.22.2
+tokenizers==0.19.1
+safetensors==0.4.3
+
+# Training utilities
+einops==0.8.0
+omegaconf==2.3.0
+hydra-core==1.3.2
+tqdm==4.66.5
+wandb==0.16.6
+
+# Image processing
+Pillow==10.3.0
+opencv-python==4.9.0.80
+imageio==2.34.1
+scikit-image==0.23.2
+matplotlib==3.8.4
+
+# Scientific computing
+scipy==1.13.0
+pandas==2.2.2
+
+# Other utilities
+colour==0.1.5
+lpips==0.1.4
+pyquaternion==0.9.9
+Shapely==2.0.4
+requests==2.31.0
+
+# Optional - not needed for bbox training
+# ultralytics==8.3.21
+# xformers==0.0.28.post2
