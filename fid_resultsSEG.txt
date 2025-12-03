@@ -1,0 +1,28 @@
+============================================================
+FID Evaluation Results
+Using torch-fidelity (standard implementation)
+============================================================
+
+Media directory: /no_backups/s1492/Ctrl-V/outputs/kitti360_sem_overall_eval/wandb/run-20251108_192456-nhl86lzj/files/media/
+Method: Existing frames
+Generated frames: 5025
+Ground truth frames: 5025
+Max frames per video: 25
+Batch size: 64
+
+FID Score: 35.7417
+
+============================================================
+
+Interpretation:
+  - FID < 50:   Excellent quality
+  - FID 50-100: Good quality
+  - FID 100-200: Moderate quality
+  - FID > 200:  Poor quality
+
+Your FID Score: 35.7417 - Excellent ✓
+
+Note: Using torch-fidelity (PyTorch implementation)
+      This is the standard FID implementation used in research.
+
+============================================================

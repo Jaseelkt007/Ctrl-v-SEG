@@ -1,0 +1,296 @@
+╔══════════════════════════════════════════════════════════════════════════════╗
+║                  KITTI-360 SEGMENTATION MODE VISUAL GUIDE                     ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                         1. DIRECTORY STRUCTURE                                │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+/no_backups/s1492/kitti360_ctrlv/
+│
+├── images/track/val/                    ← Original RGB frames
+│   └── 2013_05_28_drive_0000_sync_0000/
+│       ├── ...-0000001.png  🖼️  [RGB photo of street scene]
+│       ├── ...-0000002.png
+│       └── ...
+│
+├── bboxes/track/val/                    ← Bounding box overlays
+│   └── 2013_05_28_drive_0000_sync_0000/
+│       ├── ...-0000001.png  📦  [RGB with colored rectangles]
+│       ├── ...-0000002.png
+│       └── ...
+│
+└── semantics/track/val/                 ← Semantic segmentation maps
+    └── 2013_05_28_drive_0000_sync_0000/
+        ├── ...-0000001.png  🎨  [RGB semantic colormap]
+        ├── ...-0000002.png
+        └── ...
+
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                    2. PATH SWITCHING MECHANISM                                │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+                        ┌─────────────────────┐
+                        │  Original Image     │
+                        │  Path Known         │
+                        └──────────┬──────────┘
+                                   │
+                                   ▼
+                    ┌──────────────────────────────┐
+                    │  Check use_segmentation flag │
+                    └──────────┬───────────────────┘
+                               │
+                ┏━━━━━━━━━━━━━━┻━━━━━━━━━━━━━━┓
+                ▼                              ▼
+    ┌───────────────────────┐      ┌───────────────────────┐
+    │  use_segmentation=0   │      │  use_segmentation=1   │
+    │  (BBOX MODE)          │      │  (SEMANTIC MODE)      │
+    └───────────┬───────────┘      └───────────┬───────────┘
+                │                              │
+                ▼                              ▼
+    Replace "images/track"       Replace "images/track"
+    with "bboxes/track"          with "semantics/track"
+                │                              │
+                ▼                              ▼
+    ┌───────────────────────┐      ┌───────────────────────┐
+    │  BBox Image Path      │      │  Semantic Image Path  │
+    └───────────────────────┘      └───────────────────────┘
+
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                    3. VISUAL CONTENT COMPARISON                               │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃                          ORIGINAL RGB IMAGE                                 ┃
+┃  images/track/val/.../2013_05_28_drive_0000_sync_0000-0000007.png          ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+    ┌────────────────────────────────────────────────────────────┐
+    │                                                            │
+    │   🏢🏢🏢                                    🌳🌳           │
+    │   🏢🏢🏢                                    🌳🌳           │
+    │                                                            │
+    │        🚗                    🚙                            │
+    │   ═══════════════════════════════════════════════════     │
+    │                                                            │
+    └────────────────────────────────────────────────────────────┘
+                    Natural photo of street scene
+
+
+         ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+         ┃  use_segmentation FLAG CHECK  ┃
+         ┗━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━┛
+                       │
+        ┏━━━━━━━━━━━━━━┻━━━━━━━━━━━━━━┓
+        ▼                              ▼
+
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓  ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃  BOUNDING BOX MODE (Default)  ┃  ┃  SEMANTIC MODE (--use_seg)    ┃
+┃  use_segmentation = False     ┃  ┃  use_segmentation = True      ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛  ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+
+bboxes/track/val/.../0000007.png   semantics/track/val/.../0000007.png
+
+┌────────────────────────────────┐  ┌────────────────────────────────┐
+│                                │  │ ▓▓▓▓▓▓▓▓        ░░░░░░░░░░░░░░ │
+│   ████████                     │  │ ▓▓▓▓▓▓▓▓        ░░░░░░░░░░░░░░ │
+│   ████████                     │  │                                │
+│                                │  │                                │
+│   ┌─────────┐      ┌────────┐ │  │   ██████████      ████████     │
+│   │  Car 🚗 │      │ Car 🚙 │ │  │   ██████████      ████████     │
+│   └─────────┘      └────────┘ │  │ ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒ │
+│                                │  │                                │
+└────────────────────────────────┘  └────────────────────────────────┘
+  RGB with colored rectangles        RGB semantic colormap
+  - Background: original image        Legend:
+  - Objects: colored boxes            ▓▓ Building (gray)
+  - Boxes have class labels           ░░ Vegetation (green)
+                                      ██ Vehicle (blue)
+                                      ▒▒ Road (dark gray)
+
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                    4. TWO-STAGE PIPELINE FLOW                                 │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+INPUT: First Frame + Conditioning Images (25 frames)
+   │
+   │  ┌─────────────────────────────────────────────────────────────┐
+   │  │ Conditioning depends on --use_segmentation flag:            │
+   │  │                                                              │
+   │  │  ┌──────────────────────┐    ┌──────────────────────────┐  │
+   │  │  │ BBOX MODE            │    │ SEMANTIC MODE            │  │
+   │  │  ├──────────────────────┤    ├──────────────────────────┤  │
+   │  │  │ Frame 1: bbox img    │    │ Frame 1: semantic img    │  │
+   │  │  │ Frame 2: bbox img    │    │ Frame 2: semantic img    │  │
+   │  │  │ ...                  │    │ ...                      │  │
+   │  │  │ Frame 25: bbox img   │    │ Frame 25: semantic img   │  │
+   │  │  └──────────────────────┘    └──────────────────────────┘  │
+   │  └─────────────────────────────────────────────────────────────┘
+   │
+   ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│ STAGE 1: Semantic/BBox Predictor                                     │
+│ ┌──────────────────────────────────────────────────────────────────┐ │
+│ │ Model: VideoDiffusionPipeline                                    │ │
+│ │ Input: First frame + conditioning images (25 frames)             │ │
+│ │ Output: Predicted masks (25 frames)                              │ │
+│ └──────────────────────────────────────────────────────────────────┘ │
+└──────────────────────────────────────────────────────────────────────┘
+   │
+   │ Predicted masks (25 frames) → Used as conditioning for Stage 2
+   │
+   ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│ STAGE 2: Semantic2Video Generator                                    │
+│ ┌──────────────────────────────────────────────────────────────────┐ │
+│ │ Model: StableVideoControlPipeline                                │ │
+│ │ Input: First frame + Stage 1 predictions (25 frames)             │ │
+│ │ Output: Generated RGB video (25 frames)                          │ │
+│ └──────────────────────────────────────────────────────────────────┘ │
+└──────────────────────────────────────────────────────────────────────┘
+   │
+   ▼
+OUTPUT: Generated Video Sequence (25 RGB frames)
+
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                    5. OUTPUT NAMING CONVENTION                                │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+Original Frame: 2013_05_28_drive_0000_sync_0000-0000007.png
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           LOGGED OUTPUTS                                     │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  ┌───────────────────────────────┬───────────────────────────────────────┐ │
+│  │  BBOX MODE                    │  SEMANTIC MODE                        │ │
+│  │  (use_segmentation=False)     │  (use_segmentation=True)              │ │
+│  ├───────────────────────────────┼───────────────────────────────────────┤ │
+│  │                               │                                       │ │
+│  │  📄 Individual Frame PNGs:    │  📄 Individual Frame PNGs:            │ │
+│  │  ├─ ...-0000007_predbbox.png  │  ├─ ...-0000007_pred_sem.png         │ │
+│  │  ├─ ...-0000007_generated.png │  ├─ ...-0000007_generated.png        │ │
+│  │  ├─ ...-0000007_gt.png        │  ├─ ...-0000007_gt.png               │ │
+│  │  └─ ...-0000007_gt_bbox.png   │  └─ ...-0000007_gt_sem.png           │ │
+│  │                               │                                       │ │
+│  │  🎬 Video/GIF Logs:           │  🎬 Video/GIF Logs:                   │ │
+│  │  ├─ scene_0_stage1_pred_      │  ├─ scene_0_stage1_pred_sem_video    │ │
+│  │  │    bbox_video.gif          │  │    .gif                            │ │
+│  │  ├─ scene_0_generated_        │  ├─ scene_0_generated_video.gif      │ │
+│  │  │    video.gif               │  ├─ scene_0_gt_video.gif             │ │
+│  │  ├─ scene_0_gt_video.gif      │  └─ scene_0_gt_sem_video.gif         │ │
+│  │  └─ scene_0_gt_bbox_video.gif │                                       │ │
+│  │                               │                                       │ │
+│  └───────────────────────────────┴───────────────────────────────────────┘ │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                    6. CODE TRACE: WHERE SWITCHING HAPPENS                     │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+1️⃣  Shell Script
+    ┌────────────────────────────────────────────────────────────────┐
+    │ eval_kitti360_sem_overall.sh                                   │
+    │ ────────────────────────────────────────────────────────────── │
+    │ accelerate launch tools/eval_overall.py \                      │
+    │     --dataset_name kitti360 \                                  │
+    │     --use_segmentation \        ← FLAG SET HERE                │
+    │     ...                                                         │
+    └────────────────────────────────────────────────────────────────┘
+                                ↓
+2️⃣  Parser Validation
+    ┌────────────────────────────────────────────────────────────────┐
+    │ src/ctrlv/utils/parser.py                                      │
+    │ ────────────────────────────────────────────────────────────── │
+    │ if args.use_segmentation:                                      │
+    │     assert args.dataset_name in ["bdd100k", "davis",           │
+    │                                   "kitti360"]                   │
+    └────────────────────────────────────────────────────────────────┘
+                                ↓
+3️⃣  Dataset Initialization
+    ┌────────────────────────────────────────────────────────────────┐
+    │ src/ctrlv/utils/util.py                                        │
+    │ ────────────────────────────────────────────────────────────── │
+    │ dset = KITTI360BDDDataset(                                     │
+    │     root=dset_root,                                            │
+    │     use_segmentation=use_segmentation,  ← PASSED TO DATASET    │
+    │     ...                                                         │
+    │ )                                                               │
+    └────────────────────────────────────────────────────────────────┘
+                                ↓
+4️⃣  Dataset Stores Flag
+    ┌────────────────────────────────────────────────────────────────┐
+    │ src/ctrlv/datasets/kitti360_bdd_format.py                      │
+    │ ────────────────────────────────────────────────────────────── │
+    │ def __init__(self, ..., use_segmentation=False, ...):          │
+    │     ...                                                         │
+    │     self.use_segmentation = use_segmentation  ← STORED         │
+    └────────────────────────────────────────────────────────────────┘
+                                ↓
+5️⃣  Data Loading (Per Sample)
+    ┌────────────────────────────────────────────────────────────────┐
+    │ src/ctrlv/datasets/bdd100k.py                                  │
+    │ ────────────────────────────────────────────────────────────── │
+    │ if return_bbox_im or self.if_return_bbox_im:                   │
+    │     if self.use_preplotted_bbox or self.use_segmentation:      │
+    │         bbox_file = self.get_bbox_image_file_by_index(...)     │
+    │         bbox_im = Image.open(bbox_file)  ← LOADS CORRECT FILE  │
+    └────────────────────────────────────────────────────────────────┘
+                                ↓
+6️⃣  Path Resolution (THE KEY SWITCH!)
+    ┌────────────────────────────────────────────────────────────────┐
+    │ src/ctrlv/datasets/bdd100k.py                                  │
+    │ ────────────────────────────────────────────────────────────── │
+    │ def get_bbox_image_file_by_index(self, ...):                   │
+    │     if image_file is None:                                     │
+    │         image_file = self.get_image_file_by_index(index)       │
+    │                                                                 │
+    │     if self.use_segmentation:                                  │
+    │         # Replace 'images/track' → 'semantics/track'           │
+    │         return image_file.replace(                             │
+    │             BDD100KDataset.TO_IMAGE_DIR,                       │
+    │             BDD100KDataset.TO_SEMANTIC_DIR)  ← SEMANTIC PATH   │
+    │                                                                 │
+    │     # Replace 'images/track' → 'bboxes/track'                  │
+    │     return image_file.replace(                                 │
+    │         BDD100KDataset.TO_IMAGE_DIR,                           │
+    │         BDD100KDataset.TO_BBOX_DIR)  ← BBOX PATH               │
+    └────────────────────────────────────────────────────────────────┘
+
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                    7. QUICK REFERENCE                                         │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃  CONFIGURATION SUMMARY                                                      ┃
+┣━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┫
+┃                                                                             ┃
+┃  Flag:           --use_segmentation                                         ┃
+┃  Switch Method:  BDD100KDataset.get_bbox_image_file_by_index()             ┃
+┃  Path Constant:  TO_SEMANTIC_DIR = 'semantics/track'                       ┃
+┃  Directory:      /no_backups/s1492/kitti360_ctrlv/semantics/track/val/     ┃
+┃  Content:        RGB semantic segmentation maps (colored per-pixel labels) ┃
+┃  Output Suffix:  _pred_sem.png, _gt_sem.png                                ┃
+┃                                                                             ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  VERIFICATION STATUS                                                         │
+├─────────────────────────────────────────────────────────────────────────────┤
+│  ✅ Parser allows kitti360 for segmentation                                 │
+│  ✅ Dataset receives use_segmentation flag                                  │
+│  ✅ Path switching logic implemented                                        │
+│  ✅ Semantic directory exists (19 validation scenes)                        │
+│  ✅ All files present in semantics/ directory                               │
+│  ✅ Naming conventions distinguish semantic vs bbox                         │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+═══════════════════════════════════════════════════════════════════════════════
+                            END OF VISUAL GUIDE
+═══════════════════════════════════════════════════════════════════════════════

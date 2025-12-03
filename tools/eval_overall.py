@@ -68,10 +68,11 @@ def main():
             from ctrlv.metrics import f_measure, binary_mask_iou
             # from ignite.engine import create_supervised_evaluator
 
-            log_dict = defaultdict(list)
             metric_scores = defaultdict(list)
 
             for sample_i, sample in tqdm(enumerate(sample_generator)):
+                # Extract original frame paths for standardized naming
+                frame_paths = sample["image_paths"]
 
                 bbox_pipeline.to(accelerator.device)
                 best_score = -inf
@@ -142,12 +143,23 @@ def main():
                 print("Average bbox metrics:", np.mean(metric_scores['miou']), np.mean(metric_scores['ap']), np.mean(metric_scores['ar']), np.mean(metric_scores['miou_first_last']), np.mean(metric_scores['ap_first_last']), np.mean(metric_scores['ar_first_last']))
                 print("Std bbox metrics    :", np.std(metric_scores['miou']), np.std(metric_scores['ap']), np.std(metric_scores['ar']), np.std(metric_scores['miou_first_last']), np.std(metric_scores['ap_first_last']), np.std(metric_scores['ar_first_last']))
 
-                log_dict = {}
-                log_dict['predicted_bbox'] = wandb.Video(best_generation_np, fps=args.fps)
-                frame_bboxes = wandb_frames_with_bbox(best_generation_np, sample['objects_tensors'], (dataset.orig_W, dataset.orig_H))
-                log_dict["bbox_frames_{}".format(sample_i)] = frame_bboxes
+                # Stage 1 predicted mask (bbox or semantic) - log individual frames with standardized names
+                num_frames = min(len(best_generation_np), len(frame_paths), args.clip_length)
+                for idx in range(num_frames):
+                    orig_name = os.path.basename(frame_paths[idx])
+                    
+                    if args.use_segmentation:
+                        # SEMANTIC MODE
+                        new_name = orig_name.replace(".png", "_pred_sem.png")
+                    else:
+                        # BOUNDING BOX MODE
+                        new_name = orig_name.replace(".png", "_predbbox.png")
+                    
+                    # Transpose from (C, H, W) to (H, W, C) for WandB
+                    frame_hwc = np.transpose(best_generation_np[idx], (1, 2, 0))
+                    wandb.log({new_name: wandb.Image(frame_hwc)})
+                
                 bbox_pipeline.to('cpu')
-                del best_generation_np
 
                 ctrl_pipeline.to(accelerator.device)
                 frames = ctrl_pipeline(sample['image_init'], 
@@ -168,21 +180,76 @@ def main():
                            
                 frames = frames.detach().cpu().numpy()*255
                 frames = frames.astype(np.uint8)
-                log_dict["generated_videos"] = wandb.Video(frames, fps=args.fps)
-                log_dict["gt_bbox_frames"] = wandb.Video(sample['bbox_img_np'], fps=args.fps)
-                log_dict["gt_videos"] = wandb.Video(sample['gt_clip_np'], fps=args.fps)
-                frame_bboxes = wandb_frames_with_bbox(frames, sample['objects_tensors'], (dataset.orig_W, dataset.orig_H))
-                log_dict["frames_with_bboxes_{}".format(sample_i)] = frame_bboxes
-
-                accelerator.log(log_dict)
-                del frames, log_dict, frame_bboxes, best_generation_bbox
-                log_dict = {}
-                gt_frames_bboxes = wandb_frames_with_bbox(sample['bbox_img_np'], None, (dataset.orig_W, dataset.orig_H))
-                gt_frames = wandb_frames_with_bbox(sample['gt_clip_np'], sample['objects_tensors'], (dataset.orig_W, dataset.orig_H))
-                log_dict["gt_bboxes_{}".format(sample_i)] = gt_frames_bboxes
-                log_dict["gt_frames_{}".format(sample_i)] = gt_frames
-                accelerator.log(log_dict)
-                del sample, gt_frames_bboxes, gt_frames, log_dict
+                
+                # Stage 2 generated RGB frames - log individual frames with standardized names
+                num_frames = min(len(frames), len(frame_paths), args.clip_length)
+                for idx in range(num_frames):
+                    orig_name = os.path.basename(frame_paths[idx])
+                    new_name = orig_name.replace(".png", "_generated.png")
+                    # Transpose from (C, H, W) to (H, W, C) for WandB
+                    frame_hwc = np.transpose(frames[idx], (1, 2, 0))
+                    wandb.log({new_name: wandb.Image(frame_hwc)})
+                
+                # GT RGB frames - log individual frames with standardized names
+                gt_frames = sample["gt_clip_np"]
+                num_frames = min(len(gt_frames), len(frame_paths), args.clip_length)
+                for idx in range(num_frames):
+                    orig_name = os.path.basename(frame_paths[idx])
+                    new_name = orig_name.replace(".png", "_gt.png")
+                    # Transpose from (C, H, W) to (H, W, C) for WandB
+                    frame_hwc = np.transpose(gt_frames[idx], (1, 2, 0))
+                    wandb.log({new_name: wandb.Image(frame_hwc)})
+                
+                # GT segmentation (bbox or semantic) - log individual frames with standardized names
+                if args.use_segmentation:
+                    # For semantic mode, use segmentation masks if available
+                    # Check if segmentation_np exists, otherwise fall back to bbox_img_np
+                    if 'segmentation_np' in sample:
+                        gt_segs = sample["segmentation_np"]
+                    else:
+                        gt_segs = sample["bbox_img_np"]
+                else:
+                    gt_segs = sample["bbox_img_np"]
+                
+                num_frames = min(len(gt_segs), len(frame_paths), args.clip_length)
+                for idx in range(num_frames):
+                    orig_name = os.path.basename(frame_paths[idx])
+                    
+                    if args.use_segmentation:
+                        new_name = orig_name.replace(".png", "_gt_sem.png")
+                    else:
+                        new_name = orig_name.replace(".png", "_gt_bbox.png")
+                    
+                    # Transpose from (C, H, W) to (H, W, C) for WandB
+                    frame_hwc = np.transpose(gt_segs[idx], (1, 2, 0))
+                    wandb.log({new_name: wandb.Image(frame_hwc)})
+                
+                # -----------------------------------------
+                # LOG VIDEOS (GIF/MP4) WITH CLEAN NAMING
+                # -----------------------------------------
+                # Extract scene ID from first frame for video naming
+                first_orig_name = os.path.basename(frame_paths[0])
+                scene_id = first_orig_name.rsplit("-", 1)[0]  # e.g., 2013_05_28_drive_0000_sync_0000
+                
+                # Stage-1 predicted mask video (raw tensor → RGB video)
+                pred_video = (best_generation_bbox.detach().cpu().numpy() * 255).astype(np.uint8)
+                pred_video = np.transpose(pred_video, (0, 2, 3, 1))  # (T, C, H, W) → (T, H, W, C)
+                video_key = f"{scene_id}_{sample_i}_stage1_pred_{'sem' if args.use_segmentation else 'bbox'}_video"
+                wandb.log({video_key: wandb.Video(pred_video, fps=args.fps)})
+                
+                # Stage-2 generated RGB video
+                wandb.log({f"{scene_id}_{sample_i}_generated_video": wandb.Video(frames, fps=args.fps)})
+                
+                # GT RGB video
+                wandb.log({f"{scene_id}_{sample_i}_gt_video": wandb.Video(gt_frames, fps=args.fps)})
+                
+                # GT segmentation video (bbox or semantic)
+                gt_seg_video = gt_segs[:args.clip_length]
+                video_key = f"{scene_id}_{sample_i}_gt_{'sem' if args.use_segmentation else 'bbox'}_video"
+                wandb.log({video_key: wandb.Video(gt_seg_video, fps=args.fps)})
+                
+                del frames, best_generation_bbox, best_generation_np
+                del sample
                 torch.cuda.empty_cache()
                 if sample_i >= args.num_demo_samples:
                     break
@@ -209,7 +276,7 @@ def main():
                 bbox_pipeline = bbox_pipeline.to('cpu')
 
                 from ctrlv.models import UNetSpatioTemporalConditionModel, ControlNetModel
-                ctrlnet = ControlNetModel.from_pretrained(args.pretrained_model_name_or_path, subfolder="controlnet")
+                ctrlnet = ControlNetModel.from_pretrained(args.pretrained_model_name_or_path, subfolder="control_net")
                 unet = UNetSpatioTemporalConditionModel.from_pretrained(args.pretrained_model_name_or_path, subfolder="unet")
                 pipeline = StableVideoControlPipeline.from_pretrained("stabilityai/stable-video-diffusion-img2vid-xt",
                                                                       controlnet = ctrlnet,

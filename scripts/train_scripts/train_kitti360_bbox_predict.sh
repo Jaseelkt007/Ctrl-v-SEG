@@ -151,19 +151,19 @@ CUDA_LAUNCH_BLOCKING=1 accelerate launch \
     --report_to wandb \
     --seed 1234 \
     --mixed_precision fp16 \
-    --clip_length 8 \
+    --clip_length 25 \
     --min_guidance_scale 3 \
     --max_guidance_scale 7 \
     --noise_aug_strength 0.01 \
     --bbox_dropout_prob 0.1 \
     --conditioning_dropout_prob 0.0 \
-    --num_demo_samples 2 \
+    --num_demo_samples 4 \
     --backprop_temporal_blocks_start_iter -1 \
     --num_train_epochs 10 \
     --predict_bbox \
     --use_segmentation \
     --num_inference_steps 30 \
-    --num_cond_bbox_frames 3 \
+    --num_cond_bbox_frames 1 \
     --train_H 128 \
     --train_W 512 \
     --dataloader_num_workers 8 \

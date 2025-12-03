@@ -52,12 +52,14 @@ def get_semantic_image_path(kitti360_root, seq_name, frame_num, camera='image_00
         seq_name: Sequence name (e.g., '2013_05_28_drive_0000_sync')
         frame_num: Frame number (e.g., 250)
         camera: Camera ID ('image_00' or 'image_01')
-        split: Dataset split ('train' or 'val')
+        split: Dataset split ('train' or 'val') - NOTE: KITTI-360 stores all semantics in 'train' dir
     
     Returns:
         Path to semantic RGB image or None if not found
     """
-    semantic_path = Path(kitti360_root) / 'data_2d_semantics' / split / seq_name / camera / 'semantic_rgb' / f'{frame_num:010d}.png'
+    # KITTI-360 stores all semantic annotations in the 'train' directory
+    # regardless of whether the frame is in train or val split
+    semantic_path = Path(kitti360_root) / 'data_2d_semantics' / 'train' / seq_name / camera / 'semantic_rgb' / f'{frame_num:010d}.png'
     
     if semantic_path.exists():
         return semantic_path
@@ -320,3 +322,9 @@ if __name__ == '__main__':
 #     --kitti360_src /data/public/kitti-360/KITTI-360 \
 #     --ctrlv_dst /no_backups/s1492/kitti360_ctrlv \
 #     --split train --camera image_00 --symlink
+
+# for validation : 
+# python src/ctrlv/utils/preprocess_kitti360_semantic.py \
+#     --kitti360_src /data/public/kitti-360/KITTI-360 \
+#     --ctrlv_dst /no_backups/s1492/kitti360_ctrlv \
+#     --split val --camera image_00 --symlink

@@ -111,7 +111,7 @@ def main():
                 str(accelerator.device).replace(":0", ""), enabled=accelerator.mixed_precision == "fp16"
             ):
                 from ctrlv.models import UNetSpatioTemporalConditionModel, ControlNetModel
-                ctrlnet = ControlNetModel.from_pretrained(args.pretrained_model_name_or_path, subfolder="controlnet")
+                ctrlnet = ControlNetModel.from_pretrained(args.pretrained_model_name_or_path, subfolder="control_net")
                 unet = UNetSpatioTemporalConditionModel.from_pretrained(args.pretrained_model_name_or_path, subfolder="unet")
                 pipeline = StableVideoControlPipeline.from_pretrained("stabilityai/stable-video-diffusion-img2vid-xt",
                                                                       controlnet = ctrlnet,

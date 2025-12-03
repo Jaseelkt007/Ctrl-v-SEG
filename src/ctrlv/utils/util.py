@@ -254,6 +254,10 @@ def get_first_training_sample(batch, dataset):
     clip_idx = batch['indices'][0]
     image_init_f = dataset.get_frame_file_by_index(clip_idx, 0)
     image_init = Image.open(image_init_f)
+    
+    # Get all frame paths for the clip (for standardized naming in evaluation)
+    image_paths = dataset.get_frame_file_by_index(clip_idx, timestep=None)
+    
     if not dataset.if_return_bbox_im:
         _, gt_labels, _, cam_to_img, _ = dataset.__getitem__(clip_idx, return_calib=True)
 
@@ -263,6 +267,7 @@ def get_first_training_sample(batch, dataset):
                 image_init          =           image_init.resize((dataset.train_W, dataset.train_H)),
                 gt_labels           =           gt_labels,
                 cam_to_img          =           cam_to_img,
+                image_paths         =           image_paths,
             )
     else:
         _, gt_labels, _, cam_to_img, _, bbox_img = dataset.__getitem__(clip_idx, return_calib=True)
@@ -281,7 +286,8 @@ def get_first_training_sample(batch, dataset):
                 cam_to_img          =           cam_to_img,
                 bbox_img            =           bbox_img,
                 bbox_img_np         =           bbox_img_np,
-                bbox_init           =           bbox_init.resize((dataset.train_W, dataset.train_H))
+                bbox_init           =           bbox_init.resize((dataset.train_W, dataset.train_H)),
+                image_paths         =           image_paths,
             )
     return sample
     
