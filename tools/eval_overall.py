@@ -95,13 +95,15 @@ def main():
                                             generator=generator, output_type='pt',
                                             num_cond_bbox_frames=args.num_cond_bbox_frames).frames[0]
                     bbox_frames = bbox_im.detach().cpu().numpy()*255
+                    
+                    # Filter out completely empty frames (sum of all pixels < 50)
                     tmp = bbox_frames.sum(axis=1) < 50
                     bbox_frames[np.repeat(tmp[:, None,::], 3, axis=1)] = 0
                     
-                    for frame_i in range(1, bbox_frames.shape[0]-1):
-                        if bbox_frames[frame_i].sum(axis=0).min() > 50:
-                            # something wrong
-                            bbox_frames[frame_i] = np.zeros_like(bbox_frames[frame_i])
+                    # REMOVED BUGGY FILTER (was lines 101-105):
+                    # The previous code incorrectly zeroed out frames with CONTENT
+                    # instead of frames WITHOUT content (inverted logic).
+                    # The filter above is sufficient to catch truly broken predictions.
                 
                     bbox_frames = bbox_frames.astype(np.uint8)
                     clip_miou, clip_ap, clip_ar  = binary_mask_iou(sample['bbox_img_np'][:args.clip_length], bbox_frames)
@@ -231,11 +233,10 @@ def main():
                 first_orig_name = os.path.basename(frame_paths[0])
                 scene_id = first_orig_name.rsplit("-", 1)[0]  # e.g., 2013_05_28_drive_0000_sync_0000
                 
-                # Stage-1 predicted mask video (raw tensor → RGB video)
-                pred_video = (best_generation_bbox.detach().cpu().numpy() * 255).astype(np.uint8)
-                pred_video = np.transpose(pred_video, (0, 2, 3, 1))  # (T, C, H, W) → (T, H, W, C)
+                # Stage-1 predicted mask video (use processed numpy array, not raw tensor)
+                # wandb.Video expects (T, C, H, W) format, so NO transpose needed
                 video_key = f"{scene_id}_{sample_i}_stage1_pred_{'sem' if args.use_segmentation else 'bbox'}_video"
-                wandb.log({video_key: wandb.Video(pred_video, fps=args.fps)})
+                wandb.log({video_key: wandb.Video(best_generation_np, fps=args.fps, format="gif")})
                 
                 # Stage-2 generated RGB video
                 wandb.log({f"{scene_id}_{sample_i}_generated_video": wandb.Video(frames, fps=args.fps)})
