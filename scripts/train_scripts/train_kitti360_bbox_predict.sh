@@ -1,12 +1,11 @@
 #!/bin/bash
-#SBATCH --job-name=kittisemantic_train
-#SBATCH --output=/no_backups/s1492/Ctrl-V/logs/train_%j.out
-#SBATCH --error=/no_backups/s1492/Ctrl-V/logs/train_%j.err
+#SBATCH --job-name=Semantic_diffusion_train_stage1
+#SBATCH --output=/no_backups/s1492/Ctrl-V/logs/train_semantic_diffusion_stage1_%j.out
+#SBATCH --error=/no_backups/s1492/Ctrl-V/logs/train_semantic_diffusion_stage1_%j.err
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=48G 
 #SBATCH --gpus=1
 #SBATCH --partition=highperf
-#SBATCH --nodelist=linse23
 #SBATCH --time=96:00:00
 
 
@@ -24,7 +23,7 @@ set -u  # Exit on undefined variable
 # ============================================================================
 
 echo "========================================="
-echo "Starting KITTI360 Semantic RGB Prediction Training"
+echo "Starting KITTI360 RGB-to-Semantic Prediction Training (Stage 1)"
 echo "========================================="
 echo "Job ID: $SLURM_JOB_ID"
 echo "Node: $SLURM_NODELIST"
@@ -70,9 +69,9 @@ nvidia-smi --query-gpu=memory.used,memory.free,memory.total --format=csv
 # ============================================================================
 
 # timestamp=$(date +%y%m%d_%H%M%S)
-DATASET="kitti360"  # Uses KITTI-360 in BDD100K format
-DATASET_PATH="/no_backups/s1492/"  # Parent directory of kitti360_ctrlv/
-NAME="kitti360_semantic_predict"
+DATASET="kitti360"  # Uses KITTI360OfficialDataset with official KITTI-360 paths
+# DATASET_PATH not needed - KITTI360OfficialDataset uses official paths internally
+NAME="kitti360_semantic_predict_vae"
 
 # Checkpoints saved to /no_backups/s1492/Ctrl-V/checkpoints/<timestamped_run>/
 # For resuming training, set RESUME_FROM to the checkpoint directory
@@ -134,17 +133,17 @@ CUDA_LAUNCH_BLOCKING=1 accelerate launch \
     --dynamo_backend no \
     tools/train_video_diffusion.py \
     --run_name $NAME \
-    --data_root $DATASET_PATH \
+    --data_root "" \
     --project_name $PROJECT_NAME \
     --pretrained_model_name_or_path stabilityai/stable-video-diffusion-img2vid-xt \
     --output_dir $CHECKPOINT_DIR \
     --variant fp16 \
     --dataset_name $DATASET \
-    --train_batch_size 2 \
+    --train_batch_size 1 \
     --learning_rate 5e-6 \
-    --checkpoints_total_limit 2 \
+    --checkpoints_total_limit 1 \
     --checkpointing_steps 200 \
-    --gradient_accumulation_steps 3 \
+    --gradient_accumulation_steps 6 \
     --validation_steps 500 \
     --enable_gradient_checkpointing \
     --lr_scheduler constant \
@@ -164,10 +163,10 @@ CUDA_LAUNCH_BLOCKING=1 accelerate launch \
     --use_segmentation \
     --num_inference_steps 30 \
     --num_cond_bbox_frames 1 \
-    --train_H 128 \
-    --train_W 512 \
+    --train_H 192 \
+    --train_W 704 \
     --dataloader_num_workers 8 \
-    # --resume_from_checkpoint latest
+    --resume_from_checkpoint latest
     # --if_last_frame_trajectory  # Uncomment to use trajectory instead of last bbox frame
 
 # ============================================================================
@@ -203,7 +202,7 @@ echo "Outputs & Plots:  ${OUT_DIR}/"
 echo "SLURM Logs:       ${LOG_DIR}/train_${SLURM_JOB_ID}.{out,err}"
 echo ""
 echo "WandB Project:    ${PROJECT_NAME}"
-echo "WandB URL:        https://wandb.ai/<your_username>/${PROJECT_NAME}/runs/${NAME}"
+echo "WandB URL:        https://wandb.ai/jaseelkt1-university-of-stuttgart/${PROJECT_NAME}/runs/${NAME}"
 echo "========================================="
 echo ""
 echo "✓ Training completed successfully!"

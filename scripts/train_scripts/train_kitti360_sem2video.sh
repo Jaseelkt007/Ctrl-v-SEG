@@ -1,12 +1,12 @@
 #!/bin/bash
-#SBATCH --job-name=kitsemvideo_train
-#SBATCH --output=/no_backups/s1492/Ctrl-V/logs/train_%j.out
-#SBATCH --error=/no_backups/s1492/Ctrl-V/logs/train_%j.err
+#SBATCH --job-name=Semantic_diffusion_stage2_train
+#SBATCH --output=/no_backups/s1492/Ctrl-V/logs/train_semantic_diffusion_stage2_%j.out
+#SBATCH --error=/no_backups/s1492/Ctrl-V/logs/train_semantic_diffusion_stage2_%j.err
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=48G 
 #SBATCH --gpus=1
 #SBATCH --partition=highperf
-#SBATCH --time=72:00:00
+#SBATCH --time=96:00:00
 
 
 set -e  # Exit on error
@@ -17,7 +17,7 @@ set -u  # Exit on undefined variable
 # ============================================================================
 
 echo "========================================="
-echo "Starting KITTI360 Semantic2Video Training (Step 3)"
+echo "Starting KITTI360 Semantic-to-RGB Generation Training (Stage 2)"
 echo "========================================="
 echo "Job ID: $SLURM_JOB_ID"
 echo "Node: $SLURM_NODELIST"
@@ -63,12 +63,15 @@ nvidia-smi --query-gpu=memory.used,memory.free,memory.total --format=csv
 # ============================================================================
 
 # timestamp=$(date +%y%m%d_%H%M%S)
-DATASET="kitti360"  # Uses KITTI-360 in BDD100K format
-DATASET_PATH="/no_backups/s1492/"  # Parent directory of kitti360_ctrlv/
-NAME="kitti360_semantic2video"
+DATASET="kitti360"  # Uses KITTI360OfficialDataset with official KITTI-360 paths
+# DATASET_PATH not needed - KITTI360OfficialDataset uses official paths internally
+NAME="kitti360_semantic2video_vae"
 
-# Use semantic prediction checkpoint as base
-FINETUNED_SVD_PATH="/no_backups/s1492/Ctrl-V/checkpoints/kitti360_semantic_predict"
+# For training, we use ground truth semantic labels as conditioning
+# So we can train from scratch without waiting for Stage 1
+# Only use Stage 1 checkpoint if doing fine-tuning after Stage 1 completes
+FINETUNED_SVD_PATH=""  # Leave empty to train from base SVD
+# FINETUNED_SVD_PATH="/no_backups/s1492/Ctrl-V/checkpoints/kitti360_semantic_predict_vae"  # Uncomment to use Stage 1 checkpoint
 PRETRAINED_MODEL_NAME_OR_PATH="stabilityai/stable-video-diffusion-img2vid-xt"
 
 # Checkpoints saved to /no_backups/s1492/Ctrl-V/checkpoints/<timestamped_run>/
@@ -93,7 +96,11 @@ echo "Checkpoints will be saved to: ${CHECKPOINT_DIR}"
 echo "Logs and outputs will be saved to: ${OUT_DIR}"
 echo "SLURM logs: ${LOG_DIR}/train_${SLURM_JOB_ID}.{out,err}"
 echo "Using base SVD model: ${PRETRAINED_MODEL_NAME_OR_PATH}"
-echo "Using finetuned SVD from: ${FINETUNED_SVD_PATH}"
+if [ -n "$FINETUNED_SVD_PATH" ]; then
+    echo "Using finetuned SVD from: ${FINETUNED_SVD_PATH}"
+else
+    echo "Training from base SVD (no Stage 1 checkpoint - parallel training mode)"
+fi
 echo ""
 
 # ============================================================================
@@ -131,17 +138,17 @@ CUDA_LAUNCH_BLOCKING=1 accelerate launch \
     --dynamo_backend no \
     tools/train_video_controlnet.py \
     --run_name $NAME \
-    --data_root $DATASET_PATH \
+    --data_root "" \
     --project_name $PROJECT_NAME \
     --pretrained_model_name_or_path $PRETRAINED_MODEL_NAME_OR_PATH \
     --output_dir $CHECKPOINT_DIR \
     --variant fp16 \
     --dataset_name $DATASET \
-    --train_batch_size 2 \
+    --train_batch_size 1 \
     --learning_rate 1e-5 \
     --checkpoints_total_limit 1 \
     --checkpointing_steps 100 \
-    --gradient_accumulation_steps 2 \
+    --gradient_accumulation_steps 4 \
     --validation_steps 300 \
     --enable_gradient_checkpointing \
     --lr_scheduler constant \
@@ -156,10 +163,12 @@ CUDA_LAUNCH_BLOCKING=1 accelerate launch \
     --num_demo_samples 3 \
     --num_train_epochs 10 \
     --use_segmentation \
-    --train_H 128 \
-    --train_W 512 \
+    --num_inference_steps 30 \
+    --train_H 192 \
+    --train_W 704 \
     --dataloader_num_workers 8 \
-    --resume_from_checkpoint latest
+    --resume_from_checkpoint latest \
+    $( [ -n "$FINETUNED_SVD_PATH" ] && echo "--finetuned_svd_path $FINETUNED_SVD_PATH" )
 
 # ============================================================================
 # Post-Training Cleanup
@@ -194,7 +203,7 @@ echo "Outputs & Plots:  ${OUT_DIR}/"
 echo "SLURM Logs:       ${LOG_DIR}/train_${SLURM_JOB_ID}.{out,err}"
 echo ""
 echo "WandB Project:    ${PROJECT_NAME}"
-echo "WandB URL:        https://wandb.ai/<your_username>/${PROJECT_NAME}/runs/${NAME}"
+echo "WandB URL:        https://wandb.ai/jaseelkt1-university-of-stuttgart/${PROJECT_NAME}/runs/${NAME}"
 echo "========================================="
 echo ""
 echo "✓ Training completed successfully!"

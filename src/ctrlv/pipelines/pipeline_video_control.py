@@ -74,18 +74,43 @@ class StableVideoControlPipeline(StableVideoDiffusionPipeline_original):
         device: Union[str, torch.device],
         num_videos_per_prompt: int,
         do_classifier_free_guidance: bool,
+        semantic_ids: Optional[torch.Tensor] = None,
+        use_semantic_vae: bool = False,
     ):
+        """
+        Encode condition images using appropriate VAE.
+        
+        Args:
+            cond_image: RGB condition images [B, F, 3, H, W] or latents [B, F, 4, H, W]
+            semantic_ids: Semantic trainIDs [B, F, H, W] (if using semantic VAE)
+            use_semantic_vae: Whether to use semantic VAE instead of RGB VAE
+        """
         video_length = cond_image.shape[1]
-        cond_image = cond_image.to(device=device)
-        cond_image = cond_image.to(dtype=self.vae.dtype)
-
-        if cond_image.shape[2] == 3:
-            cond_image = rearrange(cond_image, "b f c h w -> (b f) c h w")
-            cond_em = self.vae.encode(cond_image).latent_dist.mode()
+        
+        # Use semantic VAE if requested and semantic_ids provided
+        if use_semantic_vae and semantic_ids is not None and hasattr(self, 'vae_manager'):
+            # Encode semantic IDs using semantic VAE
+            semantic_ids = semantic_ids.to(device=device)
+            semantic_ids_flat = rearrange(semantic_ids, "b f h w -> (b f) h w")
+            cond_em = self.vae_manager.encode_semantic_from_ids(semantic_ids_flat)
             cond_em = rearrange(cond_em, "(b f) c h w -> b f c h w", f=video_length)
         else:
-            assert cond_image.shape[2] == 4, "The input tensor should have 3 or 4 channels. 3 for frames and 4 for latents."
-            cond_em = cond_image
+            # Original behavior: RGB or latents
+            cond_image = cond_image.to(device=device)
+            cond_image = cond_image.to(dtype=self.vae.dtype)
+
+            if cond_image.shape[2] == 3:
+                cond_image = rearrange(cond_image, "b f c h w -> (b f) c h w")
+                
+                if hasattr(self, 'vae_manager'):
+                    cond_em = self.vae_manager.encode_rgb(cond_image)
+                else:
+                    cond_em = self.vae.encode(cond_image).latent_dist.mode()
+                
+                cond_em = rearrange(cond_em, "(b f) c h w -> b f c h w", f=video_length)
+            else:
+                assert cond_image.shape[2] == 4, "The input tensor should have 3 or 4 channels. 3 for frames and 4 for latents."
+                cond_em = cond_image
 
         # duplicate cond_em for each generation per prompt, using mps friendly method
         cond_em = cond_em.repeat(num_videos_per_prompt, 1, 1, 1, 1)
@@ -124,6 +149,8 @@ class StableVideoControlPipeline(StableVideoDiffusionPipeline_original):
         callback_on_step_end: Optional[Callable[[int, int, Dict], None]] = None,
         callback_on_step_end_tensor_inputs: List[str] = ["latents"],
         return_dict: bool = True,
+        semantic_ids: Optional[torch.Tensor] = None,
+        use_semantic_vae: bool = False,
     ):
         r"""
         The call function to the pipeline for generation.
@@ -275,10 +302,14 @@ class StableVideoControlPipeline(StableVideoDiffusionPipeline_original):
 
         # 7b. Prepare control latent embeds
         if not cond_images is None:
-            cond_em = self._encode_vae_condition(cond_images,
-                                                device, 
-                                                num_videos_per_prompt, 
-                                                self.do_classifier_free_guidance)
+            cond_em = self._encode_vae_condition(
+                cond_images,
+                device, 
+                num_videos_per_prompt, 
+                self.do_classifier_free_guidance,
+                semantic_ids=semantic_ids,
+                use_semantic_vae=use_semantic_vae
+            )
             cond_em = cond_em.to(image_embeddings.dtype)
         else:
             cond_em = None

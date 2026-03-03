@@ -5,6 +5,9 @@ import torch
 import os
 import json
 import random
+import sys
+sys.path.insert(0, '/usrhomes/s1492/Ctrl-V-seg/src')
+from ctrlv.utils.semantic_preprocessing import load_and_remap_semantic
 
 class BDD100KDataset(KittiAbstract):
     IDS_CLASS_LOOKUP = {
@@ -63,7 +66,8 @@ class BDD100KDataset(KittiAbstract):
                  H=None, W=None,
                  train_H=None, train_W=None,
                  use_segmentation=False,
-                 use_preplotted_bbox=True):
+                 use_preplotted_bbox=True,
+                 return_semantic_ids=False):
 
         super(BDD100KDataset, self).__init__(root=root, 
                                      train=train, 
@@ -83,6 +87,7 @@ class BDD100KDataset(KittiAbstract):
         self._location = 'train' if self.train else 'val'
         self.version = 'bdd100k'
         self.use_segmentation = use_segmentation
+        self.return_semantic_ids = return_semantic_ids
 
         self.image_dir = os.path.join(self.root, self.version, BDD100KDataset.TO_IMAGE_DIR, self._location)
         self.bbox_label_dir = os.path.join(self.root, self.version, BDD100KDataset.TO_BBOX_LABELS, self._location)
@@ -132,11 +137,47 @@ class BDD100KDataset(KittiAbstract):
         if return_bbox_im or self.if_return_bbox_im:
             if self.use_preplotted_bbox or self.use_segmentation:
                 bbox_file = self.get_bbox_image_file_by_index(image_file=image_file)
-                bbox_im = Image.open(bbox_file)
+                
                 if self.use_segmentation:
-                    bbox_im = bbox_im.convert('RGB')
-                if not self.transform is None:
-                    bbox_im = self.transform(bbox_im)
+                    # Load grayscale semantic and remap to trainIds
+                    if self.return_semantic_ids:
+                        # Load and preprocess grayscale semantic directly
+                        # Returns numpy array [H, W] with trainIDs
+                        semantic_ids = load_and_remap_semantic(bbox_file, ignore_index=255)
+                        
+                        # Convert to tensor: [H, W]
+                        semantic_ids_tensor = torch.from_numpy(semantic_ids).long()
+                        
+                        # Resize to training resolution if needed
+                        if self.train_H is not None and self.train_W is not None:
+                            # Add batch and channel dims: [H, W] -> [1, 1, H, W]
+                            semantic_resized = semantic_ids_tensor.unsqueeze(0).unsqueeze(0).float()
+                            # Resize using nearest neighbor to preserve label IDs
+                            semantic_resized = torch.nn.functional.interpolate(
+                                semantic_resized,
+                                size=(self.train_H, self.train_W),
+                                mode='nearest'
+                            )
+                            # Remove batch and channel dims: [1, 1, H, W] -> [H, W]
+                            semantic_ids_tensor = semantic_resized.squeeze(0).squeeze(0).long()
+                        
+                        # Load RGB visualization (always resize with transform)
+                        bbox_im = Image.open(bbox_file).convert('RGB')
+                        if not self.transform is None:
+                            bbox_im = self.transform(bbox_im)
+                        
+                        ret += (bbox_im, semantic_ids_tensor)
+                        return ret
+                    else:
+                        # Just load as RGB for visualization
+                        bbox_im = Image.open(bbox_file).convert('RGB')
+                        if not self.transform is None:
+                            bbox_im = self.transform(bbox_im)
+                else:
+                    # Bbox mode
+                    bbox_im = Image.open(bbox_file)
+                    if not self.transform is None:
+                        bbox_im = self.transform(bbox_im)
             else:
                 bbox_im = self._draw_bbox(target, None)
             ret += (bbox_im, )
@@ -147,6 +188,7 @@ class BDD100KDataset(KittiAbstract):
         images = []
         targets = []
         bboxes = []
+        semantic_ids_list = []
         
         if_return_bbox_im_cp = self.if_return_bbox_im
         self.set_if_return_bbox_im(False)
@@ -159,7 +201,12 @@ class BDD100KDataset(KittiAbstract):
             if not (if_return_bbox_im_cp or return_bbox_im):
                 image, target = self._getimageitem(frame, return_prompt=False, return_calib=False, return_index=False, return_bbox_im=False)
             else:
-                image, target, bbox = self._getimageitem(frame, return_prompt=False, return_calib=False, return_index=False, return_bbox_im=True)
+                result = self._getimageitem(frame, return_prompt=False, return_calib=False, return_index=False, return_bbox_im=True)
+                if self.use_segmentation and self.return_semantic_ids:
+                    image, target, bbox, bbox_ids = result
+                    semantic_ids_list.append(bbox_ids)
+                else:
+                    image, target, bbox = result
                 bboxes.append(bbox)
                 if self.if_last_frame_trajectory and frame_i==self.clip_length-1:
                     traj = self._draw_trajectory(target)
@@ -181,6 +228,9 @@ class BDD100KDataset(KittiAbstract):
         if return_bbox_im or self.if_return_bbox_im:
             bboxes = torch.stack(bboxes)
             ret += (bboxes, )
+            if self.use_segmentation and self.return_semantic_ids:
+                semantic_ids = torch.stack(semantic_ids_list)
+                ret += (semantic_ids, )
         return ret
     
     def _parse_label(self, label_file, frame_id):

@@ -23,13 +23,38 @@ class VideoDiffusionPipeline(StableVideoDiffusionPipeline_original):
         device: Union[str, torch.device],
         num_videos_per_prompt: int,
         do_classifier_free_guidance: bool,
+        semantic_ids: Optional[torch.Tensor] = None,
+        use_semantic_vae: bool = False,
     ):
+        """
+        Encode condition images using appropriate VAE.
+        
+        Args:
+            cond_image: RGB condition images [B, F, 3, H, W]
+            semantic_ids: Semantic trainIDs [B, F, H, W] (if using semantic VAE)
+            use_semantic_vae: Whether to use semantic VAE instead of RGB VAE
+        """
         video_length = cond_image.shape[1]
-        cond_image = cond_image.to(device=device)
-        cond_image = cond_image.to(dtype=self.vae.dtype)
-        cond_image = rearrange(cond_image, "b f c h w -> (b f) c h w")
-        cond_em = self.vae.encode(cond_image).latent_dist.mode()
-        cond_em = rearrange(cond_em, "(b f) c h w -> b f c h w", f=video_length)
+        
+        # Use semantic VAE if requested and semantic_ids provided
+        if use_semantic_vae and semantic_ids is not None and hasattr(self, 'vae_manager'):
+            # Encode semantic IDs using semantic VAE
+            semantic_ids = semantic_ids.to(device=device)
+            semantic_ids_flat = rearrange(semantic_ids, "b f h w -> (b f) h w")
+            cond_em = self.vae_manager.encode_semantic_from_ids(semantic_ids_flat)
+            cond_em = rearrange(cond_em, "(b f) c h w -> b f c h w", f=video_length)
+        else:
+            # Use RGB VAE (original behavior)
+            cond_image = cond_image.to(device=device)
+            cond_image = cond_image.to(dtype=self.vae.dtype)
+            cond_image = rearrange(cond_image, "b f c h w -> (b f) c h w")
+            
+            if hasattr(self, 'vae_manager'):
+                cond_em = self.vae_manager.encode_rgb(cond_image)
+            else:
+                cond_em = self.vae.encode(cond_image).latent_dist.mode()
+            
+            cond_em = rearrange(cond_em, "(b f) c h w -> b f c h w", f=video_length)
 
         # duplicate cond_em for each generation per prompt, using mps friendly method
         cond_em = cond_em.repeat(num_videos_per_prompt, 1, 1, 1, 1)
@@ -77,6 +102,8 @@ class VideoDiffusionPipeline(StableVideoDiffusionPipeline_original):
         callback_on_step_end_tensor_inputs: List[str] = ["latents"],
         return_dict: bool = True,
         num_cond_bbox_frames: int=3,
+        semantic_ids: Optional[torch.Tensor] = None,
+        use_semantic_vae: bool = False,
     ):
         r"""
         The call function to the pipeline for generation.
@@ -184,12 +211,26 @@ class VideoDiffusionPipeline(StableVideoDiffusionPipeline_original):
         if needs_upcasting:
             self.vae.to(dtype=torch.float32)
 
-        image_latents = self._encode_vae_image(
-            image,
-            device=device,
-            num_videos_per_prompt=num_videos_per_prompt,
-            do_classifier_free_guidance=self.do_classifier_free_guidance,
-        )
+        # 4b. Encode base conditioning latents for frames 1-23
+        # IMPORTANT: Must use the SAME VAE as the target/conditioning latents
+        # to keep all conditioning in the same latent space.
+        if use_semantic_vae and semantic_ids is not None and hasattr(self, 'vae_manager'):
+            # Use Semantic VAE: encode first frame's semantic IDs
+            first_frame_sem_ids = semantic_ids[:, 0, :, :].to(device=device)  # [B, H, W]
+            image_latents = self.vae_manager.encode_semantic_from_ids(first_frame_sem_ids)
+            image_latents = image_latents.to(image_embeddings.dtype)
+            # Handle CFG: duplicate with zeros for unconditional
+            image_latents = image_latents.repeat(num_videos_per_prompt, 1, 1, 1)
+            if self.do_classifier_free_guidance:
+                negative_image_latents = torch.zeros_like(image_latents)
+                image_latents = torch.cat([negative_image_latents, image_latents])
+        else:
+            image_latents = self._encode_vae_image(
+                image,
+                device=device,
+                num_videos_per_prompt=num_videos_per_prompt,
+                do_classifier_free_guidance=self.do_classifier_free_guidance,
+            )
         image_latents = image_latents.to(image_embeddings.dtype)
 
         # Repeat the image latents for each frame so we can concatenate them with the noise
@@ -198,10 +239,14 @@ class VideoDiffusionPipeline(StableVideoDiffusionPipeline_original):
 
         # 7b. Prepare control latent embeds
         if not bbox_images is None:
-            cond_latents = self._encode_vae_condition(bbox_images,
-                                                device, 
-                                                num_videos_per_prompt, 
-                                                self.do_classifier_free_guidance)
+            cond_latents = self._encode_vae_condition(
+                bbox_images,
+                device, 
+                num_videos_per_prompt, 
+                self.do_classifier_free_guidance,
+                semantic_ids=semantic_ids,
+                use_semantic_vae=use_semantic_vae
+            )
             image_latents[:,0:num_cond_bbox_frames,::] = cond_latents[:,0:num_cond_bbox_frames,::]
             image_latents[:,-1,::]=cond_latents[:,-1,::]
 

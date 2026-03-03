@@ -4,6 +4,7 @@ from .layout_net import LayoutNet, LayoutNetConfig
 from .unet_spatio_temporal_condition import UNetSpatioTemporalConditionModel, UNetSpatioTemporalConditionModel_with_bbox_cond
 from .attention import BBOXFrameAttention
 from .controlnet import ControlNetModel
+from .dual_vae_manager import DualVAEManager
 
 __all__ = ['KittiObjectNet', 'UNet2DConditionModel', 'UNetSpatioTemporalConditionModel', 'LayoutNet', 'LayoutNetConfig',
-           'BBOXFrameAttention', 'UNetSpatioTemporalConditionModel_with_bbox_cond', 'ControlNetModel']
+           'BBOXFrameAttention', 'UNetSpatioTemporalConditionModel_with_bbox_cond', 'ControlNetModel', 'DualVAEManager']

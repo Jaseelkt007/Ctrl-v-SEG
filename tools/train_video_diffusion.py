@@ -86,6 +86,22 @@ def main():
         vae = AutoencoderKLTemporalDecoder.from_pretrained(
             args.pretrained_model_name_or_path, subfolder="vae", revision=args.revision, variant="fp16",
         )
+        
+        # Initialize DualVAEManager for semantic VAE support
+        vae_manager = None
+        if args.use_segmentation:
+            from ctrlv.models import DualVAEManager
+            semantic_vae_ckpt = "/usrhomes/s1492/vae_semantic/checkpoints/semantic_vae_native/best_model_with_dice_boundaryweight.pth"
+            logger.info(f"Initializing DualVAEManager with semantic VAE from {semantic_vae_ckpt}")
+            vae_manager = DualVAEManager(
+                rgb_vae=vae,
+                semantic_vae_checkpoint=semantic_vae_ckpt,
+                num_semantic_classes=19,
+                device=accelerator.device,
+                clip_size=args.clip_length,  # Use same clip_length as training
+                verbose=True
+            )
+            logger.info("✓ DualVAEManager initialized for semantic VAE encoding")
         # in_channels = 12 if args.add_bbox_frame_conditioning else 8
         # in_channels = 8
         # if args.add_bbox_frame_conditioning:
@@ -230,7 +246,8 @@ def main():
                                                     use_segmentation=args.use_segmentation, 
                                                     use_preplotted_bbox=not args.if_last_frame_trajectory,
                                                     if_last_frame_traj=args.if_last_frame_trajectory,
-                                                    non_overlapping_clips=args.non_overlapping_clips)
+                                                    non_overlapping_clips=args.non_overlapping_clips,
+                                                    return_semantic_ids=args.use_segmentation)
         # _, test_loader = get_dataloader(args.dataset_name, if_train=True, 
         #                                 batch_size=1, num_workers=args.dataloader_num_workers, 
         #                                 data_type='clip', use_default_collate=True, tokenizer=None, shuffle=True)
@@ -345,7 +362,16 @@ def main():
                 if args.if_last_frame_trajectory:
                     sample_bbox = sample['bbox_img'][:args.clip_length]
                     sample_bbox[-1] = sample['bbox_img'][args.clip_length]
-                frames = pipeline(sample['image_init'], 
+                
+                # Prepare semantic conditioning if using semantic VAE
+                semantic_ids_cond = None
+                use_sem_vae = False
+                if args.predict_bbox and args.use_segmentation and vae_manager is not None and 'semantic_ids' in sample:
+                    semantic_ids_cond = sample['semantic_ids'].unsqueeze(0)  # [1, T, H, W]
+                    use_sem_vae = True
+                
+                # Run diffusion inference
+                result = pipeline(sample['image_init'], 
                                 height=train_dataset.train_H, width=train_dataset.train_W, 
                                 # bbox_conditions=sample['objects_tensors'], original_size=(train_dataset.orig_W, train_dataset.orig_H),
                                 bbox_images=sample['bbox_img'].unsqueeze(0) if args.predict_bbox else None,
@@ -355,17 +381,63 @@ def main():
                                 min_guidance_scale=args.min_guidance_scale,
                                 max_guidance_scale=args.max_guidance_scale,
                                 noise_aug_strength=args.noise_aug_strength,
-                                generator=generator, output_type='pt',
-                                num_cond_bbox_frames=args.num_cond_bbox_frames).frames[0]
-
-                #frames = F.interpolate(frames, (train_dataset.orig_H, train_dataset.orig_W)).detach().cpu().numpy()*255
-                frames = frames.detach().cpu().numpy()*255
-                frames = frames.astype(np.uint8)
-                log_dict["generated_videos"].append(wandb.Video(frames, fps=args.fps))
-                log_dict["gt_bbox_frames"].append(wandb.Video(sample['bbox_img_np'], fps=args.fps))
-                log_dict["gt_videos"].append(wandb.Video(sample['gt_clip_np'], fps=args.fps))
-                frame_bboxes = wandb_frames_with_bbox(frames, sample['objects_tensors'], (train_dataset.orig_W, train_dataset.orig_H))
-                log_dict["frames_with_bboxes_{}".format(sample_i)] = frame_bboxes
+                                generator=generator, 
+                                output_type='latent' if (args.predict_bbox and args.use_segmentation and vae_manager is not None) else 'pt',
+                                num_cond_bbox_frames=args.num_cond_bbox_frames,
+                                semantic_ids=semantic_ids_cond,
+                                use_semantic_vae=use_sem_vae)
+                
+                # Handle output based on whether we're using semantic VAE
+                if args.predict_bbox and args.use_segmentation and vae_manager is not None:
+                    # Stage 1: Decode semantic latents to semantic IDs
+                    latents = result.frames[0]  # [T, C, H, W]
+                    latents_flat = rearrange(latents, "f c h w -> f c h w")
+                    
+                    # Decode semantic latents using Semantic VAE
+                    semantic_ids = vae_manager.decode_semantic(latents_flat)  # [T, H, W] trainIDs 0-18
+                    
+                    # Convert trainIDs back to original KITTI-360 IDs
+                    from ctrlv.utils.semantic_preprocessing import KITTI360_LABEL_MAPPING, semantic_ids_to_viz_rgb
+                    trainid_to_original = {train_id: kitti_id for kitti_id, train_id in KITTI360_LABEL_MAPPING.items()}
+                    semantic_ids_original = semantic_ids.clone()
+                    for train_id, orig_id in trainid_to_original.items():
+                        semantic_ids_original[semantic_ids == train_id] = orig_id
+                    
+                    # Convert to RGB colormap for WandB visualization [T, H, W] -> [T, 3, H, W]
+                    semantic_ids_np = semantic_ids.cpu().numpy()  # [T, H, W]
+                    T, H, W = semantic_ids_np.shape
+                    frames_rgb = np.zeros((T, 3, H, W), dtype=np.uint8)
+                    for t in range(T):
+                        rgb_frame = semantic_ids_to_viz_rgb(semantic_ids_np[t])  # [H, W] -> [H, W, 3]
+                        frames_rgb[t] = rgb_frame.transpose(2, 0, 1)  # [3, H, W]
+                    
+                    # Log colorful RGB semantic frames for Stage 1
+                    log_dict["generated_semantic_frames"].append(wandb.Video(frames_rgb, fps=args.fps))
+                    
+                    # Convert GT trainIDs to RGB colormap for visualization
+                    # Use semantic_ids [T, H, W] not bbox_img [T, 3, H, W] which is RGB visualization
+                    if 'semantic_ids' in sample:
+                        gt_semantic_ids = sample['semantic_ids']  # [T, H, W] trainIDs 0-18
+                        gt_semantic_np = gt_semantic_ids.cpu().numpy()
+                        
+                        T_gt, H_gt, W_gt = gt_semantic_np.shape
+                        gt_frames_rgb = np.zeros((T_gt, 3, H_gt, W_gt), dtype=np.uint8)
+                        for t in range(T_gt):
+                            gt_rgb_frame = semantic_ids_to_viz_rgb(gt_semantic_np[t])  # [H, W] -> [H, W, 3]
+                            gt_frames_rgb[t] = gt_rgb_frame.transpose(2, 0, 1)  # [3, H, W]
+                        
+                        log_dict["gt_semantic_frames"].append(wandb.Video(gt_frames_rgb, fps=args.fps))
+                    else:
+                        logger.warning("semantic_ids not found in sample, skipping gt_semantic_frames logging")
+                else:
+                    # Stage 2 or RGB mode: Normal RGB decoding
+                    frames = result.frames[0]
+                    frames = frames.detach().cpu().numpy()*255
+                    frames = frames.astype(np.uint8)
+                    log_dict["generated_videos"].append(wandb.Video(frames, fps=args.fps))
+                    log_dict["gt_videos"].append(wandb.Video(sample['gt_clip_np'], fps=args.fps))
+                    frame_bboxes = wandb_frames_with_bbox(frames, sample['objects_tensors'], (train_dataset.orig_W, train_dataset.orig_H))
+                    log_dict["frames_with_bboxes_{}".format(sample_i)] = frame_bboxes
             return log_dict
 
         for epoch in range(first_epoch, args.num_train_epochs):
@@ -409,6 +481,9 @@ def main():
                                                                             feature_extractor=feature_extractor,
                                                                             image_encoder=unwrap_model(image_encoder),
                                                                             vae=unwrap_model(vae),)
+                                # Attach vae_manager for semantic VAE decoding in Stage 1
+                                if vae_manager is not None:
+                                    pipeline.vae_manager = vae_manager
                                 unet.eval()
                                 pipeline = pipeline.to(accelerator.device)
                                 pipeline.set_progress_bar_config(disable=True)
@@ -436,12 +511,28 @@ def main():
                     # Encode bbox objects
                     # encoded_objects = get_fourier_embeds_from_boundingbox(batch['objects'], (train_dataset.orig_W, train_dataset.orig_H), dropout_prob=args.bbox_dropout_prob, generator=generator,)
 
-                    # Encode clip frames using VAE
+                    # Encode clip frames using VAE (RGB or Semantic)
                     # [batch, frames, channels, height, width] -> [batch*frames, channels, height, width]
-                    frames = rearrange(batch['clips'] if not args.predict_bbox else batch['bbox_images'], "b f c h w -> (b f) c h w")
-                    latents = vae.encode(frames.to(dtype=weight_dtype)).latent_dist.sample()
-                    latents = rearrange(latents, "(b f) c h w -> b f c h w", b=batch_size)
-                    initial_frame_latent = vae.encode(initial_images.to(weight_dtype)).latent_dist.sample()
+                    if args.predict_bbox and args.use_segmentation and vae_manager is not None and batch.get('semantic_ids') is not None:
+                        # Use Semantic VAE for semantic ID encoding (grayscale trainIDs)
+                        semantic_ids = rearrange(batch['semantic_ids'], "b f h w -> (b f) h w")
+                        latents = vae_manager.encode_semantic_from_ids(semantic_ids)
+                        latents = rearrange(latents, "(b f) c h w -> b f c h w", b=batch_size)
+                    else:
+                        # Use RGB VAE for RGB image encoding
+                        frames = rearrange(batch['clips'] if not args.predict_bbox else batch['bbox_images'], "b f c h w -> (b f) c h w")
+                        latents = vae.encode(frames.to(dtype=weight_dtype)).latent_dist.sample()
+                        latents = rearrange(latents, "(b f) c h w -> b f c h w", b=batch_size)
+                    
+                    # Encode initial frame for conditioning (frames 1-23)
+                    # IMPORTANT: Must use the SAME VAE as target latents to keep
+                    # conditioning in the same latent space.
+                    if args.predict_bbox and args.use_segmentation and vae_manager is not None and batch.get('semantic_ids') is not None:
+                        # Use Semantic VAE: encode first frame's semantic IDs
+                        first_frame_sem_ids = batch['semantic_ids'][:, 0, :, :]  # [B, H, W]
+                        initial_frame_latent = vae_manager.encode_semantic_from_ids(first_frame_sem_ids)
+                    else:
+                        initial_frame_latent = vae.encode(initial_images.to(weight_dtype)).latent_dist.sample()
                     if not args.predict_bbox:
                         # Encode input image using VAE
                         conditional_latents = initial_frame_latent.to(dtype=unet_dtype)
@@ -459,7 +550,10 @@ def main():
 
                     target_latents = latents = latents * vae.config.scaling_factor
 
-                    del batch, frames
+                    # Clean up memory - only delete frames if it was created (RGB VAE path)
+                    del batch
+                    if 'frames' in locals():
+                        del frames
                     noise = torch.randn_like(latents)
                     
                     indices = torch.randint(0, noise_scheduler.config.num_train_timesteps, (batch_size,)).to(noise_scheduler.timesteps).long()

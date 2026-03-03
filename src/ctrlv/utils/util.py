@@ -36,7 +36,8 @@ def tokenize_captions(batch_prompts, tokenizer):
 
 def get_dataloader(dset_root, dset_name, if_train, batch_size, num_workers, data_type='image', clip_length=10,
                    collate_fn=None, use_default_collate=True, tokenizer=None, shuffle=True, if_return_bbox_im=False,
-                   train_H=None, train_W=None, use_segmentation=False, use_preplotted_bbox=True, if_last_frame_traj=False, non_overlapping_clips=False):
+                   train_H=None, train_W=None, use_segmentation=False, use_preplotted_bbox=True, if_last_frame_traj=False, 
+                   non_overlapping_clips=False, return_semantic_ids=False):
     if dset_name.lower() == 'kitti':
         from ctrlv.datasets import KittiDataset
         dset = KittiDataset(root=dset_root, train=if_train, data_type=data_type, clip_length=clip_length, if_return_bbox_im=if_return_bbox_im,
@@ -54,7 +55,8 @@ def get_dataloader(dset_root, dset_name, if_train, batch_size, num_workers, data
         if use_segmentation:
             use_preplotted_bbox = True
         dset = BDD100KDataset(root=dset_root, train=if_train, data_type=data_type, clip_length=clip_length, if_return_bbox_im=if_return_bbox_im,
-                              train_H=train_H, train_W=train_W, use_segmentation=use_segmentation, use_preplotted_bbox=use_preplotted_bbox)
+                              train_H=train_H, train_W=train_W, use_segmentation=use_segmentation, use_preplotted_bbox=use_preplotted_bbox,
+                              return_semantic_ids=return_semantic_ids)
         dset.set_if_last_frame_trajectory(if_last_frame_traj)
     elif dset_name.lower() == 'davis':
         from ctrlv.datasets import DAVISDataset
@@ -66,13 +68,26 @@ def get_dataloader(dset_root, dset_name, if_train, batch_size, num_workers, data
                                train_H=train_H, train_W=train_W, use_preplotted_bbox=True, if_3d=True,
                                bbox_dir=os.path.join(dset_root, 'nuscenes', 'preprocess_bbox_frames'), non_overlapping_clips=non_overlapping_clips)
     elif dset_name.lower() == 'kitti360':
-        from ctrlv.datasets.kitti360_bdd_format import KITTI360BDDDataset
+        from ctrlv.datasets import KITTI360OfficialDataset
         if use_segmentation:
             use_preplotted_bbox = True
-        dset = KITTI360BDDDataset(root=dset_root, train=if_train, data_type=data_type, clip_length=clip_length, 
-                                  if_return_bbox_im=if_return_bbox_im, train_H=train_H, train_W=train_W, 
-                                  use_segmentation=use_segmentation, use_preplotted_bbox=use_preplotted_bbox)
-        dset.set_if_last_frame_trajectory(if_last_frame_traj)
+        # Use official KITTI-360 dataset with txt files (no need for dset_root, uses official paths)
+        dset = KITTI360OfficialDataset(
+            root=None,  # Uses official KITTI360_ROOT internally
+            train=if_train, 
+            data_type=data_type, 
+            clip_length=clip_length, 
+            if_return_bbox_im=if_return_bbox_im, 
+            train_H=train_H, 
+            train_W=train_W, 
+            use_segmentation=use_segmentation, 
+            use_preplotted_bbox=use_preplotted_bbox,
+            return_semantic_ids=return_semantic_ids,
+            non_overlapping_clips=non_overlapping_clips
+        )
+        # KITTI360OfficialDataset doesn't have set_if_last_frame_trajectory method
+        # if hasattr(dset, 'set_if_last_frame_trajectory'):
+        #     dset.set_if_last_frame_trajectory(if_last_frame_traj)
     else:
         raise NotImplementedError("Dataset not implemented")
 
@@ -251,7 +266,14 @@ def get_first_training_sample(batch, dataset):
     gt_clip = clip[0,::].detach().cpu()
     gt_clip_np = dataset.revert_transform_no_resize(gt_clip).detach().cpu().numpy()*255
     gt_clip_np = gt_clip_np.astype(np.uint8)
-    clip_idx = batch['indices'][0]
+    # Get clip index - handle both 'index' and 'indices' keys
+    if 'index' in batch:
+        clip_idx = batch['index'][0].item() if hasattr(batch['index'][0], 'item') else batch['index'][0]
+    elif 'indices' in batch:
+        clip_idx = batch['indices'][0].item() if hasattr(batch['indices'][0], 'item') else batch['indices'][0]
+    else:
+        # Fallback: use first item from any available index-like key
+        clip_idx = 0
     image_init_f = dataset.get_frame_file_by_index(clip_idx, 0)
     image_init = Image.open(image_init_f)
     
@@ -260,7 +282,6 @@ def get_first_training_sample(batch, dataset):
     
     if not dataset.if_return_bbox_im:
         _, gt_labels, _, cam_to_img, _ = dataset.__getitem__(clip_idx, return_calib=True)
-
         sample = dict(
                 gt_clip             =           gt_clip,
                 objects_tensors     =           batch['objects'],
@@ -270,10 +291,38 @@ def get_first_training_sample(batch, dataset):
                 image_paths         =           image_paths,
             )
     else:
-        _, gt_labels, _, cam_to_img, _, bbox_img = dataset.__getitem__(clip_idx, return_calib=True)
-        bbox_img_np = dataset.revert_transform_no_resize(bbox_img).detach().cpu().numpy()*255
-        bbox_img_np = bbox_img_np.astype(np.uint8)
-        bbox_img = bbox_img.detach().cpu()
+        result = dataset.__getitem__(clip_idx, return_calib=True)
+        has_semantic_ids = False
+        if hasattr(dataset, 'return_semantic_ids') and dataset.return_semantic_ids and len(result) == 7:
+            _, gt_labels, _, cam_to_img, _, bbox_img, semantic_ids = result
+            has_semantic_ids = True
+        else:
+            _, gt_labels, _, cam_to_img, _, bbox_img = result
+        
+        # Handle semantic_ids (int64) vs bbox_images (float32) - only normalize if float
+        if bbox_img.dtype in [torch.float32, torch.float16, torch.float64]:
+            bbox_img_np = dataset.revert_transform_no_resize(bbox_img).detach().cpu().numpy()*255
+            bbox_img_np = bbox_img_np.astype(np.uint8)
+            bbox_img = bbox_img.detach().cpu()
+        else:
+            # bbox_img is semantic_ids (int64), convert back to original KITTI-360 IDs for visualization
+            # Import the mapping to reverse trainID -> original ID
+            try:
+                from ctrlv.utils.semantic_preprocessing import KITTI360_LABEL_MAPPING
+                # Create reverse mapping: trainID -> original KITTI-360 ID
+                trainid_to_original = {train_id: kitti_id for kitti_id, train_id in KITTI360_LABEL_MAPPING.items()}
+                
+                # Convert trainIDs back to original IDs
+                bbox_img_original = bbox_img.clone()
+                for train_id, orig_id in trainid_to_original.items():
+                    bbox_img_original[bbox_img == train_id] = orig_id
+                
+                bbox_img_np = bbox_img_original.detach().cpu().numpy()
+            except ImportError:
+                # Fallback: use raw trainIDs
+                bbox_img_np = bbox_img.detach().cpu().numpy()
+            bbox_img = bbox_img.detach().cpu()
+        
         bbox_init_f = dataset.get_bbox_image_file_by_index(index=clip_idx, image_file=image_init_f)
         bbox_init = Image.open(bbox_init_f).convert('RGB')
 
@@ -289,6 +338,10 @@ def get_first_training_sample(batch, dataset):
                 bbox_init           =           bbox_init.resize((dataset.train_W, dataset.train_H)),
                 image_paths         =           image_paths,
             )
+        
+        # Add semantic_ids to sample if available (for semantic VAE visualization)
+        if has_semantic_ids:
+            sample['semantic_ids'] = semantic_ids.detach().cpu()  # [T, H, W] trainIDs 0-18
     return sample
     
 

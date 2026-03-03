@@ -3,8 +3,8 @@ from .vkitti import VKittiDataset
 from .mkitti import MergedKittiDataset
 from .bdd100k import BDD100KDataset
 from .davis import DAVISDataset
-# from .nuscenes_ import NuScenesDataset 
 from .kitti360_preprocessed import Kitti360PreprocessedDataset
+from .kitti360_official import KITTI360OfficialDataset
 
 MAX_BOXES_PER_DATA = 30
 
@@ -107,15 +107,31 @@ def kitti_clip_collate_fn(batch, tokenize_fn):
 def kitti_clip_with_bbox_collate_fn(batch, tokenize_fn):
     import torch
     from collections import defaultdict
-    collated_batch = {'clips': [], 'objects': defaultdict(list), 'prompts': [], 'indices': [], 'bbox_images': []}
-    for batch_i, target_i, prompt_i, index_i, bbox_i in batch:
-        collated_batch['clips'].append(batch_i)
-        collated_batch['prompts'].append(prompt_i)
-        collated_batch['indices'].append(index_i)
-        collated_batch['bbox_images'].append(bbox_i)
+    collated_batch = {'clips': [], 'objects': defaultdict(list), 'prompts': [], 'indices': [], 'bbox_images': [], 'semantic_ids': []}
+    for item in batch:
+        collated_batch['clips'].append(item[0])
+        objects_list = item[1]
+        prompt = item[2]
+        index = item[3]
+        bbox_images = item[4]
+        
+        collated_batch['prompts'].append(prompt)
+        collated_batch['indices'].append(index)
+        collated_batch['bbox_images'].append(bbox_images)
+        
+        # Handle semantic IDs if present (when using semantic VAE)
+        # Dataset can return:
+        #   With calib: (clips, targets, prompt, calib, index, bbox_images, semantic_ids) - 7 items
+        #   No calib:   (clips, targets, prompt, index, bbox_images, semantic_ids) - 6 items
+        # semantic_ids is always the last item when present
+        if len(item) > 5:
+            semantic_ids = item[-1]  # Last item
+            # Verify it's actually semantic_ids (should be int64 tensor)
+            if hasattr(semantic_ids, 'dtype') and semantic_ids.dtype == torch.int64:
+                collated_batch['semantic_ids'].append(semantic_ids)
         frame_objects = defaultdict(list)
 
-        for frame in target_i:
+        for frame in objects_list:
             
             # make sure that the number of objects is the same for all images
             len_target = len(frame) if not frame is None else 0
@@ -144,6 +160,10 @@ def kitti_clip_with_bbox_collate_fn(batch, tokenize_fn):
         collated_batch['clips'] = torch.stack(collated_batch['clips'])
 
     collated_batch['bbox_images'] = torch.stack(collated_batch['bbox_images'])
+    if collated_batch['semantic_ids']:
+        collated_batch['semantic_ids'] = torch.stack(collated_batch['semantic_ids'])
+    else:
+        collated_batch['semantic_ids'] = None
     for key in collated_batch['objects']:
         if not key == 'type' and not key == 'num_objects':
             collated_batch['objects'][key] = torch.stack(collated_batch['objects'][key])

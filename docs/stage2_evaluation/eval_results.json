@@ -1,0 +1,245 @@
+{
+  "checkpoint": "/no_backups/s1492/Ctrl-V/checkpoints/kitti360_semantic2video_vae/checkpoint-33800",
+  "checkpoint_step": 33800,
+  "num_samples": 15,
+  "clip_length": 25,
+  "resolution": "192x704",
+  "drn_metrics": {
+    "miou": 0.4711915552161065,
+    "overall_pixel_accuracy": 0.8905219956214241,
+    "mean_class_accuracy": 0.675804852658223,
+    "frequency_weighted_iou": 0.8088695557398269
+  },
+  "fid": null,
+  "per_class": {
+    "road": {
+      "iou": 0.9296470099386428,
+      "precision": 0.9493062708503083,
+      "recall": 0.978209134801028,
+      "f1": 0.9635410053242878,
+      "gt_pixels": 7575009,
+      "pred_pixels": 7805640
+    },
+    "sidewalk": {
+      "iou": 0.6222643264921162,
+      "precision": 0.9205953266441621,
+      "recall": 0.6575570900628503,
+      "f1": 0.7671552857698128,
+      "gt_pixels": 2821463,
+      "pred_pixels": 2015297
+    },
+    "building": {
+      "iou": 0.8019852394179356,
+      "precision": 0.8760126181529642,
+      "recall": 0.9046747200702977,
+      "f1": 0.8901129952396138,
+      "gt_pixels": 9532036,
+      "pred_pixels": 9843913
+    },
+    "wall": {
+      "iou": 0.43498058112926025,
+      "precision": 0.5456950243393046,
+      "recall": 0.6819292483188708,
+      "f1": 0.6062529163801668,
+      "gt_pixels": 901180,
+      "pred_pixels": 1126162
+    },
+    "fence": {
+      "iou": 0.40886328963724716,
+      "precision": 0.7443870552936134,
+      "recall": 0.47564277253213005,
+      "f1": 0.5804158467959243,
+      "gt_pixels": 1460470,
+      "pred_pixels": 933200
+    },
+    "pole": {
+      "iou": 0.3393240133851598,
+      "precision": 0.4727236966546982,
+      "recall": 0.5459602623400852,
+      "f1": 0.5067093697924727,
+      "gt_pixels": 206907,
+      "pred_pixels": 238962
+    },
+    "traffic light": {
+      "iou": null,
+      "precision": null,
+      "recall": null,
+      "f1": null,
+      "gt_pixels": 0,
+      "pred_pixels": 0
+    },
+    "traffic sign": {
+      "iou": 0.29042572301059816,
+      "precision": 0.4155230017990234,
+      "recall": 0.4910106899902818,
+      "f1": 0.45012388986330354,
+      "gt_pixels": 16464,
+      "pred_pixels": 19455
+    },
+    "vegetation": {
+      "iou": 0.844707300434341,
+      "precision": 0.9084054276146786,
+      "recall": 0.923350832758986,
+      "f1": 0.9158171599748669,
+      "gt_pixels": 16994653,
+      "pred_pixels": 17274255
+    },
+    "terrain": {
+      "iou": 0.5918454727729752,
+      "precision": 0.7660963547585645,
+      "recall": 0.7223808206624676,
+      "f1": 0.7435966403723695,
+      "gt_pixels": 947186,
+      "pred_pixels": 893137
+    },
+    "sky": {
+      "iou": 0.8079431365153777,
+      "precision": 0.8634799268621645,
+      "recall": 0.9262635367773313,
+      "f1": 0.8937705176641828,
+      "gt_pixels": 2238716,
+      "pred_pixels": 2401493
+    },
+    "person": {
+      "iou": 0.53741849677231,
+      "precision": 0.69609243697479,
+      "recall": 0.70217004323133,
+      "f1": 0.6991180318183736,
+      "gt_pixels": 23594,
+      "pred_pixels": 23800
+    },
+    "rider": {
+      "iou": 0.15986154280870302,
+      "precision": 0.668142899320933,
+      "recall": 0.17364947820748924,
+      "f1": 0.27565625190328275,
+      "gt_pixels": 13032,
+      "pred_pixels": 3387
+    },
+    "car": {
+      "iou": 0.8799861440671835,
+      "precision": 0.926675055129605,
+      "recall": 0.9458459611621888,
+      "f1": 0.9361623720943085,
+      "gt_pixels": 5336758,
+      "pred_pixels": 5447164
+    },
+    "truck": {
+      "iou": 0.7080747036078219,
+      "precision": 0.8141709949777283,
+      "recall": 0.8445680953310658,
+      "f1": 0.8290910252487382,
+      "gt_pixels": 583902,
+      "pred_pixels": 605702
+    },
+    "bus": {
+      "iou": 0.0,
+      "precision": 0.0,
+      "recall": null,
+      "f1": null,
+      "gt_pixels": 0,
+      "pred_pixels": 12999
+    },
+    "train": {
+      "iou": 0.0,
+      "precision": 0.0,
+      "recall": null,
+      "f1": null,
+      "gt_pixels": 0,
+      "pred_pixels": 9167
+    },
+    "motorcycle": {
+      "iou": 0.0,
+      "precision": 0.0,
+      "recall": null,
+      "f1": null,
+      "gt_pixels": 0,
+      "pred_pixels": 27
+    },
+    "bicycle": {
+      "iou": 0.1241210139002453,
+      "precision": 0.3385370205173952,
+      "recall": 0.163860103626943,
+      "f1": 0.220832121035787,
+      "gt_pixels": 4632,
+      "pred_pixels": 2242
+    }
+  },
+  "per_sample": [
+    {
+      "sample_idx": 0,
+      "drn_miou": 0.5022668660795155,
+      "drn_pixel_accuracy": 0.863774805409102
+    },
+    {
+      "sample_idx": 1,
+      "drn_miou": 0.5795354248675053,
+      "drn_pixel_accuracy": 0.914695706615063
+    },
+    {
+      "sample_idx": 2,
+      "drn_miou": 0.5969130509244376,
+      "drn_pixel_accuracy": 0.8918794031507767
+    },
+    {
+      "sample_idx": 3,
+      "drn_miou": 0.5329247365073365,
+      "drn_pixel_accuracy": 0.8868176106461969
+    },
+    {
+      "sample_idx": 4,
+      "drn_miou": 0.5894704687103168,
+      "drn_pixel_accuracy": 0.8864282706678713
+    },
+    {
+      "sample_idx": 5,
+      "drn_miou": 0.4674123632483043,
+      "drn_pixel_accuracy": 0.864203437443922
+    },
+    {
+      "sample_idx": 6,
+      "drn_miou": 0.4632484738811744,
+      "drn_pixel_accuracy": 0.8768333142042303
+    },
+    {
+      "sample_idx": 7,
+      "drn_miou": 0.38155940744187267,
+      "drn_pixel_accuracy": 0.9099780822252341
+    },
+    {
+      "sample_idx": 8,
+      "drn_miou": 0.27103651997859357,
+      "drn_pixel_accuracy": 0.7811539210787095
+    },
+    {
+      "sample_idx": 9,
+      "drn_miou": 0.28813705472748385,
+      "drn_pixel_accuracy": 0.8638704886193962
+    },
+    {
+      "sample_idx": 10,
+      "drn_miou": 0.36348679027167063,
+      "drn_pixel_accuracy": 0.9455339555260941
+    },
+    {
+      "sample_idx": 11,
+      "drn_miou": 0.2920943988954244,
+      "drn_pixel_accuracy": 0.9457861036205527
+    },
+    {
+      "sample_idx": 12,
+      "drn_miou": 0.345164034322073,
+      "drn_pixel_accuracy": 0.9510448516933918
+    },
+    {
+      "sample_idx": 13,
+      "drn_miou": 0.3083650949048377,
+      "drn_pixel_accuracy": 0.8959493765097816
+    },
+    {
+      "sample_idx": 14,
+      "drn_miou": 0.4145227163521864,
+      "drn_pixel_accuracy": 0.8944822966535729
+    }
+  ]
+}

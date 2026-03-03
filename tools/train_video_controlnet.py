@@ -95,6 +95,22 @@ def main():
             args.pretrained_model_name_or_path, subfolder="vae", revision=args.revision, variant="fp16",
         )
         
+        # Initialize DualVAEManager for semantic VAE support
+        vae_manager = None
+        if args.use_segmentation:
+            from ctrlv.models import DualVAEManager
+            semantic_vae_ckpt = "/usrhomes/s1492/vae_semantic/checkpoints/semantic_vae_native/best_model_with_dice_boundaryweight.pth"
+            logger.info(f"Initializing DualVAEManager with semantic VAE from {semantic_vae_ckpt}")
+            vae_manager = DualVAEManager(
+                rgb_vae=vae,
+                semantic_vae_checkpoint=semantic_vae_ckpt,
+                num_semantic_classes=19,
+                device=accelerator.device,
+                clip_size=4,
+                verbose=True
+            )
+            logger.info("✓ DualVAEManager initialized for semantic VAE encoding")
+        
         if args.finetuned_svd_path is not None:
             latest_checkpoint = get_latest_checkpoint(args.finetuned_svd_path)
             unet_model_path = os.path.join(args.finetuned_svd_path, latest_checkpoint)
@@ -205,6 +221,7 @@ def main():
                                                     batch_size=args.train_batch_size, num_workers=args.dataloader_num_workers, 
                                                     data_type='clip', use_default_collate=True, tokenizer=None, shuffle=True,
                                                     if_return_bbox_im=True, train_H=args.train_H, train_W=args.train_W,
+                                                    return_semantic_ids=args.use_segmentation,
                                                     use_preplotted_bbox=True,
                                                     use_segmentation=args.use_segmentation)
 
@@ -320,7 +337,7 @@ def main():
                 frames = frames.detach().cpu().numpy()*255
                 frames = frames.astype(np.uint8)
                 log_dict["generated_videos"].append(wandb.Video(frames, fps=args.fps))
-                log_dict["gt_bbox_frames"].append(wandb.Video(sample['bbox_img_np'], fps=args.fps))
+                log_dict["gt_semantic_frames"].append(wandb.Video(sample['bbox_img_np'], fps=args.fps))
                 log_dict["gt_videos"].append(wandb.Video(sample['gt_clip_np'], fps=args.fps))
                 frame_bboxes = wandb_frames_with_bbox(frames, sample['objects_tensors'], (train_dataset.orig_W, train_dataset.orig_H))
                 log_dict["frames_with_bboxes_{}".format(sample_i)] = frame_bboxes
@@ -381,11 +398,18 @@ def main():
                     conditional_latents = vae.encode(initial_images.to(vae_device).to(weight_dtype)).latent_dist.sample()
                     conditional_latents = conditional_latents.to(accelerator_device).to(ctrlnet_dtype)
 
-                    # Encode bbox image using VAE
+                    # Encode semantic image using VAE for ControlNet conditioning
                     # [batch, frames, channels, height, width] -> [batch*frames, channels, height, width]
-                    bbox_frames = rearrange(batch['bbox_images'] if not args.generate_bbox else batch['clips'], 'b f c h w -> (b f) c h w').to(vae.device).to(weight_dtype)
-                    bbox_em = vae.encode(bbox_frames).latent_dist.sample()
-                    bbox_em = rearrange(bbox_em, '(b f) c h w -> b f c h w', f=video_length).to(accelerator_device).to(ctrlnet_dtype)
+                    if args.use_segmentation and vae_manager is not None and batch.get('semantic_ids') is not None:
+                        # Use Semantic VAE for semantic ID encoding (grayscale trainIDs)
+                        semantic_ids = rearrange(batch['semantic_ids'], 'b f h w -> (b f) h w')
+                        bbox_em = vae_manager.encode_semantic_from_ids(semantic_ids)
+                        bbox_em = rearrange(bbox_em, '(b f) c h w -> b f c h w', f=video_length).to(accelerator_device).to(ctrlnet_dtype)
+                    else:
+                        # Use RGB VAE for RGB bbox image encoding
+                        bbox_frames = rearrange(batch['bbox_images'] if not args.generate_bbox else batch['clips'], 'b f c h w -> (b f) c h w').to(vae.device).to(weight_dtype)
+                        bbox_em = vae.encode(bbox_frames).latent_dist.sample()
+                        bbox_em = rearrange(bbox_em, '(b f) c h w -> b f c h w', f=video_length).to(accelerator_device).to(ctrlnet_dtype)
 
                     # Encode clip frames using VAE
                     # [batch, frames, channels, height, width] -> [batch*frames, channels, height, width]
