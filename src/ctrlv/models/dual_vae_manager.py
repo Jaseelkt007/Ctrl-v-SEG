@@ -231,23 +231,37 @@ class DualVAEManager(nn.Module):
         with torch.no_grad():
             return self.rgb_vae.decode(latents, **kwargs)
     
-    def decode_semantic(self, latents: torch.Tensor) -> torch.Tensor:
+    def decode_semantic(self, latents: torch.Tensor, unscale: bool = True) -> torch.Tensor:
         """
         Decode latents to semantic IDs using Semantic VAE.
-        
+
+        IMPORTANT: Diffusion training scales latents by vae.config.scaling_factor (0.18215).
+        The semantic VAE decoder expects UNSCALED latents (raw encoder mean z).
+        When decoding diffusion outputs, we must divide by scaling_factor first.
+
         Args:
             latents: [B*F, C, H_latent, W_latent] (already flat from encode)
-        
+            unscale: If True (default), divide by RGB VAE scaling_factor before decoding.
+                     Set to False only if latents are already unscaled.
+
         Returns:
             semantic_ids: [B*F, H, W] trainIDs (0-18)
         """
         with torch.no_grad():
             # Mirror the encode structure:
-            # Encode: semantic_stem -> _encode_semantic_features -> latents
-            # Decode: latents -> _decode_to_semantic_features -> semantic_head -> logits
-            
+            # Encode: semantic_stem -> _encode_semantic_features -> latents (unscaled)
+            # Training: latents * scaling_factor -> diffusion target (scaled)
+            # Decode: latents / scaling_factor -> _decode_to_semantic_features -> semantic_head -> logits
+
             bf = latents.shape[0]
-            
+
+            # Unscale latents from diffusion space back to VAE latent space
+            # The RGB VAE's decode_latents() does this same unscaling internally,
+            # but since we bypass that path with output_type='latent', we must do it here.
+            if unscale:
+                scaling_factor = self.rgb_vae.config.scaling_factor  # 0.18215
+                latents = latents / scaling_factor
+
             # Decode latents to semantic features [B*F, 128, H, W]
             decoded_features = self.semantic_vae.model._decode_to_semantic_features(latents)
             

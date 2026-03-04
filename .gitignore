@@ -169,3 +169,4 @@ cython_debug/
 
 /logs
 docs/stage2_evaluation/comparison_frames/
+CLAUDE.md

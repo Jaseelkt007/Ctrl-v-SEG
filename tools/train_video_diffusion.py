@@ -413,20 +413,46 @@ def main():
                     
                     # Log colorful RGB semantic frames for Stage 1
                     log_dict["generated_semantic_frames"].append(wandb.Video(frames_rgb, fps=args.fps))
-                    
+
                     # Convert GT trainIDs to RGB colormap for visualization
                     # Use semantic_ids [T, H, W] not bbox_img [T, 3, H, W] which is RGB visualization
                     if 'semantic_ids' in sample:
                         gt_semantic_ids = sample['semantic_ids']  # [T, H, W] trainIDs 0-18
                         gt_semantic_np = gt_semantic_ids.cpu().numpy()
-                        
+
                         T_gt, H_gt, W_gt = gt_semantic_np.shape
                         gt_frames_rgb = np.zeros((T_gt, 3, H_gt, W_gt), dtype=np.uint8)
                         for t in range(T_gt):
                             gt_rgb_frame = semantic_ids_to_viz_rgb(gt_semantic_np[t])  # [H, W] -> [H, W, 3]
                             gt_frames_rgb[t] = gt_rgb_frame.transpose(2, 0, 1)  # [3, H, W]
-                        
+
                         log_dict["gt_semantic_frames"].append(wandb.Video(gt_frames_rgb, fps=args.fps))
+
+                        # Debug mIoU: compare predicted vs GT semantic IDs
+                        pred_np = semantic_ids_np  # [T, H, W] already computed above
+                        gt_np = gt_semantic_np     # [T, H, W]
+                        # Resize pred to GT if shapes differ
+                        if pred_np.shape != gt_np.shape:
+                            import torch.nn.functional as F_resize
+                            pred_t = torch.from_numpy(pred_np).unsqueeze(1).float()
+                            pred_t = F_resize.interpolate(pred_t, size=(gt_np.shape[1], gt_np.shape[2]), mode='nearest')
+                            pred_np = pred_t.squeeze(1).numpy().astype(np.int64)
+                        # Per-class IoU via confusion matrix
+                        num_cls = 19
+                        valid_mask = (gt_np >= 0) & (gt_np < num_cls) & (pred_np >= 0) & (pred_np < num_cls)
+                        if valid_mask.any():
+                            gt_valid = gt_np[valid_mask]
+                            pred_valid = pred_np[valid_mask]
+                            conf = np.zeros((num_cls, num_cls), dtype=np.int64)
+                            np.add.at(conf, (gt_valid, pred_valid), 1)
+                            intersection = np.diag(conf)
+                            union = conf.sum(axis=1) + conf.sum(axis=0) - intersection
+                            valid_classes = union > 0
+                            iou_per_class = np.where(valid_classes, intersection / (union + 1e-10), 0.0)
+                            sample_miou = iou_per_class[valid_classes].mean() if valid_classes.any() else 0.0
+                            pixel_acc = intersection.sum() / (conf.sum() + 1e-10)
+                            log_dict.setdefault("val_miou_per_sample", []).append(sample_miou)
+                            log_dict.setdefault("val_pixel_acc_per_sample", []).append(pixel_acc)
                     else:
                         logger.warning("semantic_ids not found in sample, skipping gt_semantic_frames logging")
                 else:
@@ -440,8 +466,16 @@ def main():
                     log_dict["frames_with_bboxes_{}".format(sample_i)] = frame_bboxes
             return log_dict
 
+        # Latent statistics tracker for scaling factor analysis
+        # Tracks running mean/std of semantic latents to compare with RGB VAE scaling factor (0.18215)
+        latent_stats = {
+            'sum': 0.0, 'sq_sum': 0.0, 'count': 0,
+            'min': float('inf'), 'max': float('-inf'),
+            'per_channel_sum': np.zeros(4), 'per_channel_sq_sum': np.zeros(4), 'per_channel_count': 0,
+        }
+
         for epoch in range(first_epoch, args.num_train_epochs):
-            
+
             train_loss = 0.0
             for _, batch in enumerate(train_loader):
 
@@ -489,6 +523,14 @@ def main():
                                 pipeline.set_progress_bar_config(disable=True)
                                 log_dict = run_inference_with_pipeline(pipeline, demo_samples, log_dict)
 
+                            # Aggregate and log mIoU metrics if computed
+                            if "val_miou_per_sample" in log_dict:
+                                miou_samples = log_dict.pop("val_miou_per_sample")
+                                pixacc_samples = log_dict.pop("val_pixel_acc_per_sample")
+                                log_dict["val/miou"] = float(np.mean(miou_samples))
+                                log_dict["val/pixel_accuracy"] = float(np.mean(pixacc_samples))
+                                logger.info(f"Validation mIoU: {log_dict['val/miou']:.4f}, Pixel Acc: {log_dict['val/pixel_accuracy']:.4f}")
+
                             for tracker in accelerator.trackers:
                                 if tracker.name == "wandb":
                                     tracker.log(log_dict)
@@ -513,11 +555,16 @@ def main():
 
                     # Encode clip frames using VAE (RGB or Semantic)
                     # [batch, frames, channels, height, width] -> [batch*frames, channels, height, width]
+                    if args.predict_bbox and args.use_segmentation and vae_manager is not None:
+                        assert batch.get('semantic_ids') is not None, \
+                            "semantic_ids not found in batch! Ensure return_semantic_ids=True is passed to dataset."
                     if args.predict_bbox and args.use_segmentation and vae_manager is not None and batch.get('semantic_ids') is not None:
                         # Use Semantic VAE for semantic ID encoding (grayscale trainIDs)
                         semantic_ids = rearrange(batch['semantic_ids'], "b f h w -> (b f) h w")
                         latents = vae_manager.encode_semantic_from_ids(semantic_ids)
                         latents = rearrange(latents, "(b f) c h w -> b f c h w", b=batch_size)
+                        if global_step == 0 and accelerator.is_main_process:
+                            logger.info("Using Semantic VAE encoding for target latents (semantic mode active)")
                     else:
                         # Use RGB VAE for RGB image encoding
                         frames = rearrange(batch['clips'] if not args.predict_bbox else batch['bbox_images'], "b f c h w -> (b f) c h w")
@@ -538,15 +585,63 @@ def main():
                         conditional_latents = initial_frame_latent.to(dtype=unet_dtype)
                     else:
                         if args.if_last_frame_trajectory:
-                            conditional_latents = latents.to(dtype=unet_dtype)
+                            conditional_latents = latents.clone().to(dtype=unet_dtype)
                             last_conditional_latents = conditional_latents[:,-1,::]
                             latents = latents[:,:-1,::]
                             conditional_latents = conditional_latents[:,:-1,::]
                             conditional_latents[:,args.num_cond_bbox_frames:-1,::] = initial_frame_latent.unsqueeze(1).repeat(1, video_length-args.num_cond_bbox_frames-1, 1, 1, 1)
                             conditional_latents[:,-1,::] = last_conditional_latents
                         else:
-                            conditional_latents = latents.to(dtype=unet_dtype)
+                            conditional_latents = latents.clone().to(dtype=unet_dtype)
                             conditional_latents[:,args.num_cond_bbox_frames:-1,::] = initial_frame_latent.unsqueeze(1).repeat(1, video_length-args.num_cond_bbox_frames-1, 1, 1, 1)
+
+                    # ---- Latent statistics tracking (lightweight, no GPU sync) ----
+                    # Collect stats on UNSCALED latents to evaluate whether 0.18215 is appropriate
+                    if accelerator.is_main_process:
+                        with torch.no_grad():
+                            lat_detached = latents.detach().float()
+                            lat_mean = lat_detached.mean().item()
+                            lat_std = lat_detached.std().item()
+                            lat_min = lat_detached.min().item()
+                            lat_max = lat_detached.max().item()
+                            numel = lat_detached.numel()
+
+                            latent_stats['sum'] += lat_mean * numel
+                            latent_stats['sq_sum'] += (lat_std**2 + lat_mean**2) * numel
+                            latent_stats['count'] += numel
+                            latent_stats['min'] = min(latent_stats['min'], lat_min)
+                            latent_stats['max'] = max(latent_stats['max'], lat_max)
+
+                            # Per-channel stats [B, F, C, H, W] -> mean over B, F, H, W
+                            per_ch_mean = lat_detached.mean(dim=(0, 1, 3, 4)).cpu().numpy()  # [4]
+                            per_ch_std = lat_detached.std(dim=(0, 1, 3, 4)).cpu().numpy()    # [4]
+                            n_spatial = lat_detached.shape[0] * lat_detached.shape[1] * lat_detached.shape[3] * lat_detached.shape[4]
+                            latent_stats['per_channel_sum'] += per_ch_mean * n_spatial
+                            latent_stats['per_channel_sq_sum'] += (per_ch_std**2 + per_ch_mean**2) * n_spatial
+                            latent_stats['per_channel_count'] += n_spatial
+
+                        # One-time detailed report at step 0
+                        if global_step == 0:
+                            suggested_sf = 1.0 / lat_std if lat_std > 0 else 0.18215
+                            logger.info(
+                                f"\n{'='*60}\n"
+                                f"LATENT STATISTICS REPORT (Step 0, first batch)\n"
+                                f"{'='*60}\n"
+                                f"  Unscaled semantic latents:\n"
+                                f"    Mean:  {lat_mean:.6f}\n"
+                                f"    Std:   {lat_std:.6f}\n"
+                                f"    Min:   {lat_min:.6f}\n"
+                                f"    Max:   {lat_max:.6f}\n"
+                                f"  Per-channel mean: {per_ch_mean}\n"
+                                f"  Per-channel std:  {per_ch_std}\n"
+                                f"  Current scaling factor (RGB VAE): {vae.config.scaling_factor}\n"
+                                f"  Suggested scaling factor (1/std): {suggested_sf:.6f}\n"
+                                f"  Ratio (suggested/current):        {suggested_sf / vae.config.scaling_factor:.2f}x\n"
+                                f"  After scaling with 0.18215:\n"
+                                f"    Scaled std: {lat_std * vae.config.scaling_factor:.6f}\n"
+                                f"    (ideal ≈ 1.0 for noise schedule)\n"
+                                f"{'='*60}"
+                            )
 
                     target_latents = latents = latents * vae.config.scaling_factor
 
@@ -645,11 +740,37 @@ def main():
                     progress_bar.update(1)
                     global_step += 1
                     log_plot = {
-                                "train_loss": train_loss, 
+                                "train_loss": train_loss,
                                 "lr": lr_scheduler.get_last_lr()[0],
                             }
                     if args.add_bbox_frame_conditioning:
                         log_plot["|attn_rz_weight|"] = get_model_attr(unet, 'get_attention_rz_weight')()
+
+                    # Log latent statistics every 100 steps (negligible overhead)
+                    if accelerator.is_main_process and latent_stats['count'] > 0 and global_step % 100 == 0:
+                        running_mean = latent_stats['sum'] / latent_stats['count']
+                        running_var = latent_stats['sq_sum'] / latent_stats['count'] - running_mean**2
+                        running_std = max(running_var, 0.0) ** 0.5
+                        suggested_sf = 1.0 / running_std if running_std > 0 else 0.18215
+                        scaled_std = running_std * vae.config.scaling_factor
+
+                        log_plot["latent_stats/unscaled_mean"] = running_mean
+                        log_plot["latent_stats/unscaled_std"] = running_std
+                        log_plot["latent_stats/unscaled_min"] = latent_stats['min']
+                        log_plot["latent_stats/unscaled_max"] = latent_stats['max']
+                        log_plot["latent_stats/scaled_std"] = scaled_std
+                        log_plot["latent_stats/suggested_scaling_factor"] = suggested_sf
+                        log_plot["latent_stats/current_scaling_factor"] = vae.config.scaling_factor
+
+                        # Per-channel stats
+                        if latent_stats['per_channel_count'] > 0:
+                            ch_mean = latent_stats['per_channel_sum'] / latent_stats['per_channel_count']
+                            ch_var = latent_stats['per_channel_sq_sum'] / latent_stats['per_channel_count'] - ch_mean**2
+                            ch_std = np.sqrt(np.maximum(ch_var, 0.0))
+                            for c in range(4):
+                                log_plot[f"latent_stats/ch{c}_mean"] = float(ch_mean[c])
+                                log_plot[f"latent_stats/ch{c}_std"] = float(ch_std[c])
+
                     accelerator.log(log_plot, step=global_step)
                     train_loss = 0.0
 
@@ -682,7 +803,63 @@ def main():
                 if global_step >= args.max_train_steps:
                     break
             
+        # Final latent statistics report
         accelerator.wait_for_everyone()
+        if accelerator.is_main_process and latent_stats['count'] > 0:
+            running_mean = latent_stats['sum'] / latent_stats['count']
+            running_var = latent_stats['sq_sum'] / latent_stats['count'] - running_mean**2
+            running_std = max(running_var, 0.0) ** 0.5
+            suggested_sf = 1.0 / running_std if running_std > 0 else 0.18215
+            scaled_std = running_std * vae.config.scaling_factor
+
+            ch_mean = latent_stats['per_channel_sum'] / max(latent_stats['per_channel_count'], 1)
+            ch_var = latent_stats['per_channel_sq_sum'] / max(latent_stats['per_channel_count'], 1) - ch_mean**2
+            ch_std = np.sqrt(np.maximum(ch_var, 0.0))
+
+            report = (
+                f"\n{'='*70}\n"
+                f"FINAL LATENT STATISTICS REPORT (accumulated over {global_step} steps)\n"
+                f"{'='*70}\n"
+                f"  Unscaled semantic latent statistics:\n"
+                f"    Global mean:  {running_mean:.6f}\n"
+                f"    Global std:   {running_std:.6f}\n"
+                f"    Global min:   {latent_stats['min']:.6f}\n"
+                f"    Global max:   {latent_stats['max']:.6f}\n"
+                f"  Per-channel mean: [{', '.join(f'{m:.4f}' for m in ch_mean)}]\n"
+                f"  Per-channel std:  [{', '.join(f'{s:.4f}' for s in ch_std)}]\n"
+                f"\n"
+                f"  Scaling factor analysis:\n"
+                f"    Current (RGB VAE):   {vae.config.scaling_factor}\n"
+                f"    Suggested (1/std):   {suggested_sf:.6f}\n"
+                f"    Ratio (sugg/curr):   {suggested_sf / vae.config.scaling_factor:.2f}x\n"
+                f"    Scaled std (curr):   {scaled_std:.6f}  (ideal ≈ 1.0)\n"
+                f"    Scaled std (sugg):   {running_std * suggested_sf:.6f}\n"
+                f"\n"
+                f"  Interpretation:\n"
+            )
+            if abs(scaled_std - 1.0) < 0.3:
+                report += f"    ✓ Current scaling factor is REASONABLE (scaled_std={scaled_std:.3f}, close to 1.0)\n"
+            elif scaled_std < 0.7:
+                report += (
+                    f"    ⚠ Latents are OVER-COMPRESSED by current scaling factor\n"
+                    f"      scaled_std={scaled_std:.3f} << 1.0 → noise dominates signal\n"
+                    f"      Consider using suggested_sf={suggested_sf:.6f} for better training\n"
+                )
+            else:
+                report += (
+                    f"    ⚠ Latents are UNDER-COMPRESSED by current scaling factor\n"
+                    f"      scaled_std={scaled_std:.3f} >> 1.0 → signal dominates noise\n"
+                    f"      Consider using suggested_sf={suggested_sf:.6f} for better training\n"
+                )
+            report += f"{'='*70}"
+            logger.info(report)
+
+            # Save report to file
+            report_path = os.path.join(args.output_dir, "latent_statistics_report.txt")
+            with open(report_path, 'w') as f:
+                f.write(report)
+            logger.info(f"Latent statistics report saved to {report_path}")
+
         if accelerator.is_main_process:
             unet = unwrap_model(unet)
             if args.use_ema:

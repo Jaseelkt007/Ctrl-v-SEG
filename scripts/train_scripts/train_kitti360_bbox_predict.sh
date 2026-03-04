@@ -165,8 +165,8 @@ CUDA_LAUNCH_BLOCKING=1 accelerate launch \
     --num_cond_bbox_frames 1 \
     --train_H 192 \
     --train_W 704 \
-    --dataloader_num_workers 8 \
-    --resume_from_checkpoint latest
+    --dataloader_num_workers 8
+    # --resume_from_checkpoint latest  # Commented out: retraining from scratch with semantic VAE fix
     # --if_last_frame_trajectory  # Uncomment to use trajectory instead of last bbox frame
 
 # ============================================================================
