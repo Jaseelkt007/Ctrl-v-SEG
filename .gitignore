@@ -170,3 +170,39 @@ cython_debug/
 /logs
 docs/stage2_evaluation/comparison_frames/
 CLAUDE.md
+.env
+# Frontend (Next.js/React)
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/build/
+frontend/.turbo/
+frontend/.vercel/
+frontend/.swc/
+frontend/next-env.d.ts
+frontend/.env*.local
+frontend/package-lock.json
+frontend/yarn.lock
+frontend/pnpm-lock.yaml
+
+# Backend
+backend/__pycache__/
+backend/jobs/
+backend/*.pyc
+backend/.env
+backend/venv/
+backend/env/
+
+# IDE and system files
+.claude/
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Temporary and cache files
+*.tmp
+*.temp
+.cache/

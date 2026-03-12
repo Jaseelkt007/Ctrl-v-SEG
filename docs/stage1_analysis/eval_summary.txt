@@ -1,0 +1,35 @@
+Stage 1 Evaluation Summary
+============================================================
+
+Checkpoint: step 4400
+Checkpoint dir: /no_backups/s1492/Ctrl-V/checkpoints/kitti360_semantic_predict_vae
+Num samples: 5
+Clip length: 25
+Resolution: 192x704
+
+Overall Metrics:
+  mIoU:              46.03%
+  Pixel Accuracy:    80.24%
+  Mean Accuracy:     56.73%
+  FW-IoU:            68.50%
+
+Per-Class IoU:
+  road               86.53%
+  sidewalk           63.50%
+  building           78.25%
+  wall               35.99%
+  fence              34.81%
+  pole               16.59%
+  traffic light      N/A
+  traffic sign       0.00%
+  vegetation         66.49%
+  terrain            42.17%
+  sky                78.91%
+  person             0.00%
+  rider              N/A
+  car                49.06%
+  truck              N/A
+  bus                N/A
+  train              N/A
+  motorcycle         N/A
+  bicycle            N/A

@@ -4,8 +4,9 @@
 #SBATCH --error=/no_backups/s1492/Ctrl-V/logs/eval_stage1_sem_%j.err
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=48G
-#SBATCH --gpus=1
-#SBATCH --partition=highperf
+#SBATCH --gpus=rtx_a5000:1
+#SBATCH --partition=stud
+#SBATCH --qos=batch
 #SBATCH --time=04:00:00
 
 set -e
@@ -45,7 +46,7 @@ CHECKPOINT_DIR="/no_backups/s1492/Ctrl-V/checkpoints/kitti360_semantic_predict_v
 OUTPUT_DIR="/no_backups/s1492/Ctrl-V/outputs/eval_stage1_semantic"
 
 # Number of video clips to evaluate (each clip = 25 frames)
-NUM_SAMPLES=15
+NUM_SAMPLES=170
 
 # Number of videos to save visualized frames for
 NUM_SAVE_VIDEOS=10

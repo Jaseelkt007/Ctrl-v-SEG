@@ -4,9 +4,10 @@
 #SBATCH --error=/no_backups/s1492/Ctrl-V/logs/eval_stage2_rgb_%j.err
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=48G
-#SBATCH --gpus=1
-#SBATCH --partition=highperf
-#SBATCH --time=20:00:00
+#SBATCH --gpus=rtx_a5000:1
+#SBATCH --partition=stud
+#SBATCH --qos=batch
+#SBATCH --time=04:00:00
 
 set -e
 set -u
@@ -37,11 +38,12 @@ nvidia-smi --query-gpu=memory.used,memory.free,memory.total --format=csv
 # ============================================================================
 # Evaluation Configuration
 # ============================================================================
-
-CHECKPOINT_DIR="/no_backups/s1492/Ctrl-V/checkpoints/kitti360_semantic2video_vae"
-OUTPUT_DIR="/no_backups/s1492/Ctrl-V/outputs/eval_stage2_rgb"
-NUM_SAMPLES=150
-NUM_SAVE_VIDEOS=150
+# CHECKPOINT_DIR="/no_backups/s1492/Ctrl-V/checkpoints/kitti360_semantic2video_vae"
+CHECKPOINT_DIR="/no_backups/s1492/Ctrl-V/checkpoints/kitti360_sem2video_unet_unfreeze"
+# OUTPUT_DIR="/no_backups/s1492/Ctrl-V/outputs/eval_stage2_rgb"
+OUTPUT_DIR="/no_backups/s1492/Ctrl-V/outputs/eval_stage2_rgb_unet_unfreeze"
+NUM_SAMPLES=20
+NUM_SAVE_VIDEOS=20
 
 DRN_DIR="/usrhomes/s1492/drn"
 DRN_CHECKPOINT="/usrhomes/s1492/drn/KITTI360_checkpoints/checkpoint_030.pth.tar"
@@ -77,7 +79,7 @@ python tools/eval_stage2_rgb.py \
     --train_H 192 \
     --train_W 704 \
     --num_workers 4 \
-    --num_samples 150 \
+    --num_samples $NUM_SAMPLES \
     --num_inference_steps 30 \
     --min_guidance_scale 1.0 \
     --max_guidance_scale 3.0 \

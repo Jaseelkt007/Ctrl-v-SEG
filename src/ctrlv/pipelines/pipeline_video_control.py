@@ -93,6 +93,8 @@ class StableVideoControlPipeline(StableVideoDiffusionPipeline_original):
             semantic_ids = semantic_ids.to(device=device)
             semantic_ids_flat = rearrange(semantic_ids, "b f h w -> (b f) h w")
             cond_em = self.vae_manager.encode_semantic_from_ids(semantic_ids_flat)
+            # Scale semantic latents to match RGB latent space (consistent with training)
+            cond_em = cond_em * self.vae.config.scaling_factor
             cond_em = rearrange(cond_em, "(b f) c h w -> b f c h w", f=video_length)
         else:
             # Original behavior: RGB or latents

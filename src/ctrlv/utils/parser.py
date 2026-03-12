@@ -66,6 +66,12 @@ def parse_args():
         help="Initial learning rate (after the potential warmup period) to use.",
     )
     parser.add_argument(
+        "--unet_learning_rate",
+        type=float,
+        default=None,
+        help="Learning rate for unfrozen UNet parameters (mid_block + up_blocks). If None, UNet stays fully frozen.",
+    )
+    parser.add_argument(
         "--object_net_lr_factor",
         type=float,
         default=1.0,

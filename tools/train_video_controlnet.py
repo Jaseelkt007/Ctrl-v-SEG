@@ -136,6 +136,20 @@ def main():
         vae.requires_grad_(False)
         image_encoder.requires_grad_(False)
         unet.requires_grad_(False)
+
+        # Partial UNet unfreezing: mid_block + output projection layers only
+        # Rationale: ControlNet's mid_block residual is added directly to UNet's mid_block output,
+        # making mid_block the highest-impact, memory-efficient target. Output layers are tiny.
+        # Deliberately skipping up_blocks to stay within 48GB VRAM budget.
+        if args.unet_learning_rate is not None:
+            logger.info("Partially unfreezing UNet: mid_block + output projection layers only")
+            for name, param in unet.named_parameters():
+                if any(key in name for key in ['mid_block', 'conv_norm_out', 'conv_act', 'conv_out']):
+                    param.requires_grad_(True)
+            unet_trainable = sum(p.numel() for p in unet.parameters() if p.requires_grad)
+            unet_total = sum(p.numel() for p in unet.parameters())
+            logger.info(f"  UNet trainable: {unet_trainable:,} / {unet_total:,} params ({100*unet_trainable/unet_total:.1f}%)")
+
         # Load the model
         ctrlnet = ControlNetModel.from_unet(unet)
 
@@ -159,7 +173,15 @@ def main():
         # Move unet, vae and text_encoder to device and cast to weight_dtype
         vae.to(vae_device, dtype=weight_dtype)
         image_encoder.to(vae_device, dtype=weight_dtype)
-        unet.to(accelerator_device, dtype=weight_dtype)
+        if args.unet_learning_rate is not None:
+            # Partially unfrozen UNet: move to device first, then cast only frozen params to fp16
+            # Trainable params must stay fp32 for mixed-precision optimizer to work
+            unet.to(accelerator_device)
+            for name, param in unet.named_parameters():
+                if not param.requires_grad:
+                    param.data = param.data.to(dtype=weight_dtype)
+        else:
+            unet.to(accelerator_device, dtype=weight_dtype)
 
         # `accelerate` 0.16.0 will have better support for customized saving
         if version.parse(accelerate.__version__) >= version.parse("0.16.0"):
@@ -209,8 +231,19 @@ def main():
 
         ctrlnet.requires_grad_(True)
 
+        # Build optimizer param groups: ControlNet (+ optionally unfrozen UNet parts)
+        optimizer_params = [
+            {"params": ctrlnet.parameters(), "lr": args.learning_rate},
+        ]
+        if args.unet_learning_rate is not None:
+            unet_trainable_params = [p for p in unet.parameters() if p.requires_grad]
+            optimizer_params.append(
+                {"params": unet_trainable_params, "lr": args.unet_learning_rate}
+            )
+            logger.info(f"Optimizer: ControlNet LR={args.learning_rate}, UNet LR={args.unet_learning_rate}")
+
         optimizer = torch.optim.AdamW(
-            ctrlnet.parameters(), 
+            optimizer_params,
             lr=args.learning_rate,
             betas=(args.adam_beta1, args.adam_beta2),
             weight_decay=args.adam_weight_decay,
@@ -369,6 +402,7 @@ def main():
                                                                             torch_dtype=weight_dtype,
                                                                             )
                                 ctrlnet.eval()
+                                unet.eval()
                                 pipeline = pipeline.to(accelerator_device)
                                 pipeline.set_progress_bar_config(disable=True)
                                 log_dict = run_inference_with_pipeline(pipeline, demo_samples, log_dict)
@@ -380,7 +414,9 @@ def main():
                             torch.cuda.empty_cache()
                 
                 ctrlnet.train()
-                with accelerator.accumulate(ctrlnet):
+                if args.unet_learning_rate is not None:
+                    unet.train()
+                with accelerator.accumulate(ctrlnet, unet) if args.unet_learning_rate is not None else accelerator.accumulate(ctrlnet):
                     # Forward pass
                     batch_size, video_length = batch['clips'].shape[0], batch['clips'].shape[1]
                     initial_images = batch['clips'][:,0,:,:,:] if not args.generate_bbox else batch['bbox_images'][:,0,:,:,:] # only use the first frame
@@ -404,6 +440,8 @@ def main():
                         # Use Semantic VAE for semantic ID encoding (grayscale trainIDs)
                         semantic_ids = rearrange(batch['semantic_ids'], 'b f h w -> (b f) h w')
                         bbox_em = vae_manager.encode_semantic_from_ids(semantic_ids)
+                        # Scale semantic latents to match RGB latent space (RGB latents are scaled by scaling_factor)
+                        bbox_em = bbox_em * vae.config.scaling_factor
                         bbox_em = rearrange(bbox_em, '(b f) c h w -> b f c h w', f=video_length).to(accelerator_device).to(ctrlnet_dtype)
                     else:
                         # Use RGB VAE for RGB bbox image encoding
