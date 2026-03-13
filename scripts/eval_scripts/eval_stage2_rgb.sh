@@ -7,7 +7,7 @@
 #SBATCH --gpus=rtx_a5000:1
 #SBATCH --partition=stud
 #SBATCH --qos=batch
-#SBATCH --time=24:00:00
+#SBATCH --time=48:00:00
 
 set -e
 set -u

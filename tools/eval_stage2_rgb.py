@@ -43,7 +43,7 @@ from accelerate.logging import get_logger
 
 with warnings.catch_warnings():
     warnings.simplefilter("ignore")
-    from ctrlv.utils import get_dataloader, get_n_training_samples
+    from ctrlv.utils import get_dataloader, eval_samples_generator
     from ctrlv.models import UNetSpatioTemporalConditionModel, ControlNetModel
     from ctrlv.pipelines import StableVideoControlPipeline
     from ctrlv.utils.semantic_preprocessing import (
@@ -360,10 +360,7 @@ def main():
     total_clips = len(val_dataset)
     num_eval    = min(args.num_samples, total_clips)
     print(f"  Val dataset: {total_clips} non-overlapping clips")
-    print(f"  Evaluating:  {num_eval} clips")
-
-    demo_samples = get_n_training_samples(val_loader, num_eval, show_progress=True)
-    print(f"  ✓ Collected {len(demo_samples)} samples")
+    print(f"  Evaluating:  {num_eval} clips  (streaming — no preload)")
 
     # ====================================================================
     # [3/5] Run inference + compute per-sample metrics
@@ -375,13 +372,13 @@ def main():
 
     per_sample_results = []
     all_lpips, all_ssim, all_psnr = [], [], []
-    all_gt_frames  = []   # for FVD  (N, T, H, W, 3) uint8
+    all_gt_frames  = []   # for FVD — stores 16-frame clips (N, 16, H, W, 3) uint8
     all_gen_frames = []   # for FVD
 
-    # FID temp dirs — populated during the loop, evaluated after
-    fid_temp    = tempfile.mkdtemp(prefix='eval_s2_fid_')
-    fid_gt_dir  = os.path.join(fid_temp, 'gt');  os.makedirs(fid_gt_dir)
-    fid_gen_dir = os.path.join(fid_temp, 'gen'); os.makedirs(fid_gen_dir)
+    # FID temp dirs on real disk (not /tmp which is RAM-backed tmpfs on SLURM nodes)
+    fid_temp    = os.path.join(args.output_dir, '_fid_tmp')
+    fid_gt_dir  = os.path.join(fid_temp, 'gt');  os.makedirs(fid_gt_dir,  exist_ok=True)
+    fid_gen_dir = os.path.join(fid_temp, 'gen'); os.makedirs(fid_gen_dir, exist_ok=True)
     fid_frame_idx = 0
 
     # Optional frame saving
@@ -390,7 +387,10 @@ def main():
         os.makedirs(frames_dir, exist_ok=True)
     trainid_to_original = {tid: kid for kid, tid in KITTI360_LABEL_MAPPING.items()}
 
-    for sample_i, sample in enumerate(tqdm(demo_samples, desc="Evaluating")):
+    sample_stream = eval_samples_generator(val_loader)
+    for sample_i, sample in enumerate(tqdm(sample_stream, total=num_eval, desc="Evaluating")):
+        if sample_i >= num_eval:
+            break
         bbox_img_rgb      = sample['bbox_img'].unsqueeze(0)          # [1, T, 3, H, W]
         semantic_ids_cond = sample['semantic_ids'].unsqueeze(0)      # [1, T, H, W]
 
@@ -412,10 +412,12 @@ def main():
                 use_semantic_vae=True,
             )
 
-        # Decode frames
+        # Decode frames — free the pipeline result immediately to reclaim GPU/CPU memory
         gen_frames_pt  = result.frames[0]                                           # [T, 3, H, W] float [0,1]
         gen_frames_np  = (gen_frames_pt.detach().cpu().numpy() * 255).astype(np.uint8)  # [T, 3, H, W]
         gen_frames_hwc = np.transpose(gen_frames_np, (0, 2, 3, 1))                 # [T, H, W, 3]
+        del result, gen_frames_pt, gen_frames_np
+        torch.cuda.empty_cache()
 
         gt_frames_np   = sample['gt_clip_np']                                       # [T, 3, H, W] uint8
         gt_frames_hwc  = np.transpose(gt_frames_np, (0, 2, 3, 1))                  # [T, H, W, 3]
@@ -462,9 +464,9 @@ def main():
                 os.path.join(fid_gen_dir, f'{fid_frame_idx:06d}.png'))
             fid_frame_idx += 1
 
-        # -- Collect for FVD --
-        all_gt_frames.append(gt_frames_hwc)
-        all_gen_frames.append(gen_frames_hwc)
+        # -- Collect for FVD (sample to 16 frames immediately to keep RAM low) --
+        all_gt_frames.append(sample_video_frames(gt_frames_hwc))
+        all_gen_frames.append(sample_video_frames(gen_frames_hwc))
 
         per_sample_results.append({
             'sample_idx':        sample_i,
@@ -492,7 +494,8 @@ def main():
                 Image.fromarray(semantic_ids_to_viz_rgb(drn_pred[t])).save(
                     os.path.join(drn_sem_dir, f'frame_{t:03d}.png'))
 
-    print(f"\n  Inference done. {fid_frame_idx} frame pairs collected for FID.")
+    n_evaluated = len(per_sample_results)
+    print(f"\n  Inference done. {n_evaluated} clips, {fid_frame_idx} frame pairs collected for FID.")
 
     # ====================================================================
     # [4/5] Global image/video metrics  (FID, FVD-I3D, FVD-VideoMAE)
@@ -518,10 +521,10 @@ def main():
     finally:
         shutil.rmtree(fid_temp, ignore_errors=True)
 
-    # -- Build 16-frame FVD arrays --
-    print("\n  Building 16-frame FVD arrays (uniform temporal sampling)...")
-    gt_fvd_np  = np.stack([sample_video_frames(v) for v in all_gt_frames],  axis=0)
-    gen_fvd_np = np.stack([sample_video_frames(v) for v in all_gen_frames], axis=0)
+    # -- Build FVD arrays (already sampled to 16 frames during inference loop) --
+    print("\n  Stacking FVD arrays (16-frame clips)...")
+    gt_fvd_np  = np.stack(all_gt_frames,  axis=0)   # (N, 16, H, W, 3) uint8
+    gen_fvd_np = np.stack(all_gen_frames, axis=0)
     print(f"  FVD input shape: {gen_fvd_np.shape}  (N, 16, H, W, C) uint8")
 
     # -- FVD-I3D --
@@ -572,7 +575,7 @@ def main():
 
     # ---- Console summary ----
     print("\n" + "=" * 80)
-    print(f"STAGE 2 RESULTS  —  Checkpoint step {ckpt_step}  |  {len(demo_samples)} clips evaluated")
+    print(f"STAGE 2 RESULTS  —  Checkpoint step {ckpt_step}  |  {n_evaluated} clips evaluated")
     print("=" * 80)
 
     print("\n  Semantic Quality (DRN on Generated RGB vs GT):")
@@ -615,7 +618,7 @@ def main():
     json_results = {
         'checkpoint':       ckpt_path,
         'checkpoint_step':  ckpt_step,
-        'num_samples':      len(demo_samples),
+        'num_samples':      n_evaluated,
         'clip_length':      args.clip_length,
         'resolution':       f'{args.train_H}x{args.train_W}',
         'dataset':          args.dataset_name,
@@ -666,7 +669,7 @@ def main():
         f.write(f"Checkpoint step : {ckpt_step}\n")
         f.write(f"Checkpoint dir  : {checkpoint_dir}\n")
         f.write(f"Dataset         : {args.dataset_name} (val, non-overlapping)\n")
-        f.write(f"Num samples     : {len(demo_samples)}\n")
+        f.write(f"Num samples     : {n_evaluated}\n")
         f.write(f"Clip length     : {args.clip_length}\n")
         f.write(f"Resolution      : {args.train_H}x{args.train_W}\n\n")
         f.write("DRN Metrics (Generated RGB → Semantic):\n")
