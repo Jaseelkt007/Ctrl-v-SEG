@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { clsx } from "clsx";
-import { healthCheck, getInfo, listJobs, compareJobs, deleteJob } from "@/lib/api";
+import { healthCheck, getInfo, listJobs, compareJobs, deleteJob, renameJob } from "@/lib/api";
 import StagePanel from "@/components/StagePanel";
 import AnalysisCard from "@/components/AnalysisCard";
 
@@ -28,6 +28,8 @@ export default function Home() {
   const [isComparing, setIsComparing] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [renamingJob, setRenamingJob] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState("");
 
   const copyJobId = useCallback((id: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -79,6 +81,19 @@ export default function Home() {
       /* ignore */
     } finally {
       setIsDeleting(false);
+    }
+  };
+
+  const handleRename = async (jobId: string) => {
+    try {
+      await renameJob(jobId, renameValue.trim());
+      setJobs((prev) =>
+        prev.map((j) => j.job_id === jobId ? { ...j, nickname: renameValue.trim() } : j)
+      );
+    } catch {
+      /* ignore */
+    } finally {
+      setRenamingJob(null);
     }
   };
 
@@ -231,9 +246,49 @@ export default function Home() {
                         : "border-[var(--border)] cursor-pointer hover:bg-[var(--bg-card-hover)] hover:border-zinc-600"
                     )}
                   >
-                    <code className="text-sm font-mono font-bold text-violet-400">
-                      {job.job_id}
-                    </code>
+                    {/* Name / rename section */}
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      {renamingJob === job.job_id ? (
+                        <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                          <input
+                            autoFocus
+                            type="text"
+                            value={renameValue}
+                            onChange={(e) => setRenameValue(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") handleRename(job.job_id);
+                              if (e.key === "Escape") setRenamingJob(null);
+                            }}
+                            onBlur={() => handleRename(job.job_id)}
+                            placeholder="Add a label..."
+                            className="bg-[var(--bg-input)] border border-violet-500 rounded px-2 py-0.5 text-xs text-zinc-200 w-40 focus:outline-none"
+                          />
+                        </div>
+                      ) : (
+                        <>
+                          {job.nickname ? (
+                            <span className="text-sm font-semibold text-zinc-100 truncate max-w-[180px]">{job.nickname}</span>
+                          ) : null}
+                          <code className={clsx("font-mono font-bold text-violet-400", job.nickname ? "text-[10px] text-violet-500" : "text-sm")}>
+                            {job.job_id}
+                          </code>
+                          {/* Rename button */}
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setRenameValue(job.nickname || "");
+                              setRenamingJob(job.job_id);
+                            }}
+                            title="Rename job"
+                            className="p-1 rounded text-zinc-700 hover:text-zinc-300 hover:bg-zinc-700/50 transition-colors flex-shrink-0"
+                          >
+                            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                            </svg>
+                          </button>
+                        </>
+                      )}
+                    </div>
                     {/* Copy button */}
                     <button
                       onClick={(e) => copyJobId(job.job_id, e)}

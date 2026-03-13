@@ -324,12 +324,12 @@ export default function StagePanel({ stage, initialConfig }: { stage: 1 | 2; ini
     const jid = jobId; // capture at call time
     if (evalPollRef.current) clearInterval(evalPollRef.current);
     setIsEvaluating(true);
-    setEvalStep(stage === 1 ? "Comparing predicted vs GT semantic IDs..." : "Running DRN on generated frames...");
+    setEvalStep(stage === 1 ? "Comparing predicted vs GT semantic IDs..." : "Running DRN + FID + FVD-I3D + FVD-VideoMAE...");
     addLog("Starting evaluation...");
     try {
       await evaluateJob(jid);
       addLog("Evaluation submitted, computing metrics...");
-      setEvalStep(stage === 1 ? "Computing mIoU, pixel accuracy..." : "Computing DRN mIoU + SSIM/PSNR/LPIPS...");
+      setEvalStep(stage === 1 ? "Computing mIoU, pixel accuracy..." : "Computing DRN mIoU + SSIM/PSNR/LPIPS + FID + FVD-I3D + FVD-VideoMAE...");
       evalPollRef.current = setInterval(async () => {
         try {
           const data = await getJobStatus(jid);

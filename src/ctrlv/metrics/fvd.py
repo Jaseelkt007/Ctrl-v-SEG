@@ -184,6 +184,7 @@ class FVD:
         fid = np.real(m + np.trace(sigma_gen + sigma_real - s * 2))
         return fid
 
+
 def evaluate_vids(vid_dir, samples=200, downsample=False, num_frames=25):
     
     f_gt_vid = []

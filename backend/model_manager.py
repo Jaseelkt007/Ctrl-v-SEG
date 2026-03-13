@@ -23,7 +23,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 SEMANTIC_VAE_CHECKPOINT = '/usrhomes/s1492/vae_semantic/checkpoints/semantic_vae_native/best_model_with_dice_boundaryweight.pth'
 BASE_MODEL = 'stabilityai/stable-video-diffusion-img2vid-xt'
 STAGE1_CHECKPOINT_DIR = '/no_backups/s1492/Ctrl-V/checkpoints/kitti360_semantic_predict_vae'
-STAGE2_CHECKPOINT_DIR = '/no_backups/s1492/Ctrl-V/checkpoints/kitti360_semantic2video_vae'
+STAGE2_CHECKPOINT_DIR = '/no_backups/s1492/Ctrl-V/checkpoints/kitti360_sem2video_unet_unfreeze'
+# STAGE2_CHECKPOINT_DIR = '/no_backups/s1492/Ctrl-V/checkpoints/kitti360_semantic2video_vae'
 DRN_DIR = '/usrhomes/s1492/drn'
 DRN_CHECKPOINT = '/usrhomes/s1492/drn/KITTI360_checkpoints/checkpoint_030.pth.tar'
 DRN_INFO_JSON = '/usrhomes/s1492/drn/CTRLV_BBOX/info.json'
@@ -213,7 +214,7 @@ class ModelManager:
         from ctrlv.utils import get_dataloader
 
         self.dataset, self.dataloader = get_dataloader(
-            '', 'kitti360', if_train=True,
+            '', 'kitti360', if_train=False,
             clip_length=25, batch_size=1, num_workers=2,
             data_type='clip', use_default_collate=True, tokenizer=None, shuffle=False,
             if_return_bbox_im=True, train_H=192, train_W=704,

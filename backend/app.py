@@ -604,16 +604,22 @@ async def analyse_job(job_id: str):
         eval_results = json.load(f)
 
     stage = config.get('stage', 1)
+    log_summary = _extract_log_summary(job_dir)
+    nickname_str = f' (nickname: "{config["nickname"]}")' if config.get('nickname') else ''
+
     # Build prompt
     if stage == 1:
         prompt = f"""You are a computer vision researcher analyzing semantic segmentation prediction results from a video diffusion model trained on KITTI-360 autonomous driving data.
 
 Model: Stage 1 Semantic Predictor (SVD-based, predicts future semantic segmentation from RGB input)
 Dataset: KITTI-360 (19 semantic classes: road, sidewalk, building, wall, fence, pole, traffic light, traffic sign, vegetation, terrain, sky, person, rider, car, truck, bus, train, motorcycle, bicycle)
-Training step: {config.get('num_inference_steps', 'unknown')} inference steps
-Config: sample_index={config.get('sample_index')}, seed={config.get('seed')}
+Job ID: {job_id}{nickname_str}
+Config: sample_index={config.get('sample_index')}, num_inference_steps={config.get('num_inference_steps')}, seed={config.get('seed')}, num_cond_bbox_frames={config.get('num_cond_bbox_frames')}
 
-Evaluation Results (comparing predicted vs ground-truth semantic IDs):
+=== KEY LOG LINES (checkpoint used, tensor shapes, inference details) ===
+{log_summary}
+
+=== EVALUATION RESULTS (predicted vs ground-truth semantic IDs) ===
 {json.dumps(eval_results, indent=2)}
 
 Respond ONLY with valid JSON in this exact schema:
@@ -632,9 +638,13 @@ Respond ONLY with valid JSON in this exact schema:
 
 Model: Stage 2 Sem2Video (SVD ControlNet, generates RGB video from semantic maps)
 Dataset: KITTI-360
-Config: sample_index={config.get('sample_index')}, conditioning_scale={config.get('conditioning_scale')}, seed={config.get('seed')}
+Job ID: {job_id}{nickname_str}
+Config: sample_index={config.get('sample_index')}, conditioning_scale={config.get('conditioning_scale')}, num_inference_steps={config.get('num_inference_steps')}, seed={config.get('seed')}
 
-Evaluation Results (DRN semantic accuracy on generated RGB + image quality metrics):
+=== KEY LOG LINES (checkpoint used, tensor shapes, inference details) ===
+{log_summary}
+
+=== EVALUATION RESULTS (DRN semantic accuracy on generated RGB + image quality metrics) ===
 {json.dumps(eval_results, indent=2)}
 
 Metrics guide: DRN mIoU measures semantic consistency of generated frames. SSIM (0-1, higher=better), PSNR (higher=better, >25dB good), LPIPS (0-1, lower=better, <0.15 good).
@@ -672,10 +682,11 @@ async def compare_jobs(body: dict):
         cfg = _load_config(d)
         eval_p = os.path.join(d, 'eval_results.json')
         ev = json.load(open(eval_p)) if os.path.exists(eval_p) else None
-        return cfg, ev
+        logs = _extract_log_summary(d)
+        return cfg, ev, logs
 
-    cfg1, ev1 = load_job(job_id1)
-    cfg2, ev2 = load_job(job_id2)
+    cfg1, ev1, logs1 = load_job(job_id1)
+    cfg2, ev2, logs2 = load_job(job_id2)
     cfg1 = cfg1 or {}
     cfg2 = cfg2 or {}
     stage = cfg1.get('stage', 1)
@@ -705,20 +716,29 @@ async def compare_jobs(body: dict):
               for r in config_diff]
     config_table_str = "\n".join([header, sep] + rows)
 
+    nick1 = f' "{cfg1["nickname"]}"' if cfg1.get('nickname') else ''
+    nick2 = f' "{cfg2["nickname"]}"' if cfg2.get('nickname') else ''
+
     prompt = f"""You are a computer vision researcher comparing two experiment runs of a {'semantic segmentation predictor (Stage 1: RGB→Semantic)' if stage == 1 else 'semantic-to-video ControlNet (Stage 2: Semantic→RGB)'} trained on KITTI-360 autonomous driving data.
 
 === CONFIGURATION COMPARISON ===
 {config_table_str}
 
-=== JOB A ({job_id1}) EVALUATION RESULTS ===
+=== JOB A ({job_id1}{nick1}) — KEY LOG LINES ===
+{logs1}
+
+=== JOB A ({job_id1}{nick1}) — EVALUATION RESULTS ===
 {json.dumps(ev1, indent=2) if ev1 else 'No evaluation available'}
 
-=== JOB B ({job_id2}) EVALUATION RESULTS ===
+=== JOB B ({job_id2}{nick2}) — KEY LOG LINES ===
+{logs2}
+
+=== JOB B ({job_id2}{nick2}) — EVALUATION RESULTS ===
 {json.dumps(ev2, indent=2) if ev2 else 'No evaluation available'}
 
 {'Metrics guide (Stage 1): mIoU (higher=better, >50% good), pixel_accuracy (higher=better).' if stage == 1 else 'Metrics guide (Stage 2): DRN mIoU measures semantic consistency of generated RGB (higher=better). SSIM (0-1, higher=better), PSNR (higher=better, >25dB good), LPIPS (0-1, lower=better, <0.15 good).'}
 
-Focus especially on HOW the configuration differences (rows marked YES in the table) explain the metric differences between the two jobs.
+Use the log lines (checkpoint paths, tensor shapes like "Generated RGB frames: (25, 192, 704, 3)", inference params) as additional context about each run. Focus especially on HOW the configuration differences (rows marked YES in the table) explain the metric differences between the two jobs.
 
 Respond ONLY with valid JSON in this exact schema:
 {{
@@ -740,6 +760,68 @@ Respond ONLY with valid JSON in this exact schema:
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Gemini API error: {str(e)}")
+
+
+def _compute_fid(gt_hwc: np.ndarray, gen_hwc: np.ndarray, log_fn=None) -> float | None:
+    """Compute FID between GT and generated frames using torch-fidelity (CPU to avoid thread deadlock)."""
+    import shutil, tempfile
+    try:
+        from torch_fidelity import calculate_metrics
+        tmp = tempfile.mkdtemp(prefix='backend_fid_')
+        gt_d  = os.path.join(tmp, 'gt');  os.makedirs(gt_d)
+        gen_d = os.path.join(tmp, 'gen'); os.makedirs(gen_d)
+        for t in range(gt_hwc.shape[0]):
+            Image.fromarray(gt_hwc[t]).save(os.path.join(gt_d,  f'{t:06d}.png'))
+            Image.fromarray(gen_hwc[t]).save(os.path.join(gen_d, f'{t:06d}.png'))
+        # cuda=False avoids ThreadPoolExecutor deadlock when CUDA is already initialised
+        m = calculate_metrics(input1=gen_d, input2=gt_d,
+                              cuda=False, isc=False, fid=True, kid=False, prc=False,
+                              verbose=False, batch_size=25)
+        shutil.rmtree(tmp, ignore_errors=True)
+        return float(m['frechet_inception_distance'])
+    except ImportError:
+        if log_fn: log_fn("  FID skipped: torch-fidelity not installed (pip install torch-fidelity)")
+        return None
+    except Exception as e:
+        if log_fn: log_fn(f"  FID failed: {e}")
+        if 'tmp' in locals(): shutil.rmtree(tmp, ignore_errors=True)
+        return None
+
+
+def _compute_fvd_i3d(gt_hwc: np.ndarray, gen_hwc: np.ndarray, log_fn=None) -> float | None:
+    """Compute FVD-I3D using cdfvd (i3d_pretrained_400.pt, cached locally)."""
+    try:
+        from cdfvd.fvd import cdfvd as CdFVD
+        # cdfvd expects (B, T, H, W, C) uint8
+        real = gt_hwc[np.newaxis]   # (1, T, H, W, 3)
+        fake = gen_hwc[np.newaxis]
+        ev = CdFVD(model='i3d', n_real='full', n_fake='full', device='cuda')
+        score = ev.compute_fvd(real, fake)
+        del ev
+        import torch; torch.cuda.empty_cache()
+        return float(score)
+    except Exception as e:
+        if log_fn: log_fn(f"  FVD-I3D failed: {e}")
+        return None
+
+
+def _compute_fvd_videomae(gt_hwc: np.ndarray, gen_hwc: np.ndarray, log_fn=None) -> float | None:
+    """Compute FVD-VideoMAE using VideoMAE-Base (MCG-NJU/videomae-base, HuggingFace)."""
+    try:
+        import sys, os as _os
+        sys.path.insert(0, _os.path.join(_os.path.dirname(__file__), '..', 'src'))
+        from ctrlv.metrics.fvd import FVD_VideoMAE
+        # FVD_VideoMAE expects (B, T, H, W, C) uint8
+        real = gt_hwc[np.newaxis]   # (1, T, H, W, 3)
+        fake = gen_hwc[np.newaxis]
+        ev = FVD_VideoMAE(device='cuda')
+        score = ev.evaluate(real, fake)
+        del ev
+        import torch; torch.cuda.empty_cache()
+        return float(score)
+    except Exception as e:
+        if log_fn: log_fn(f"  FVD-VideoMAE failed: {e}")
+        return None
 
 
 # ============================================================================
@@ -821,6 +903,33 @@ async def _run_evaluation(job_id: str, config: dict, loop):
                     None, lambda: mgr.compute_image_metrics(gt_rgb, gen_frames, log_fn)
                 )
                 metrics['image_quality'] = img_metrics
+
+                # FID
+                await send_log(job_id, "Computing FID (Inception-v3, torch-fidelity)...")
+                fid_val = await loop.run_in_executor(
+                    None, lambda: _compute_fid(gt_rgb, gen_frames, log_fn)
+                )
+                if fid_val is not None:
+                    metrics['fid'] = fid_val
+                    await send_log(job_id, f"FID (Inception-v3): {fid_val:.4f}")
+
+                # FVD-I3D
+                await send_log(job_id, "Computing FVD-I3D (I3D backbone)...")
+                fvd_i3d_val = await loop.run_in_executor(
+                    None, lambda: _compute_fvd_i3d(gt_rgb, gen_frames, log_fn)
+                )
+                if fvd_i3d_val is not None:
+                    metrics['fvd_i3d'] = fvd_i3d_val
+                    await send_log(job_id, f"FVD-I3D: {fvd_i3d_val:.4f}")
+
+                # FVD-VideoMAE
+                await send_log(job_id, "Computing FVD-VideoMAE (VideoMAE-Base / MCG-NJU)...")
+                fvd_vmae_val = await loop.run_in_executor(
+                    None, lambda: _compute_fvd_videomae(gt_rgb, gen_frames, log_fn)
+                )
+                if fvd_vmae_val is not None:
+                    metrics['fvd_videomae'] = fvd_vmae_val
+                    await send_log(job_id, f"FVD-VideoMAE: {fvd_vmae_val:.4f}")
 
         # Save metrics
         metrics_path = os.path.join(job_dir, 'eval_results.json')
@@ -931,6 +1040,7 @@ async def list_jobs():
                 has_eval = os.path.exists(os.path.join(JOBS_DIR, d, 'eval_results.json'))
                 jobs.append({
                     'job_id': d,
+                    'nickname': config.get('nickname', ''),
                     'stage': config.get('stage'),
                     'status': config.get('status'),
                     'created_at': config.get('created_at', ''),
@@ -962,6 +1072,22 @@ async def delete_job(job_id: str):
         raise HTTPException(status_code=400, detail="Cannot delete a running job")
     shutil.rmtree(job_dir)
     return {"status": "deleted", "job_id": job_id}
+
+
+@app.patch("/api/jobs/{job_id}/rename")
+async def rename_job(job_id: str, body: dict):
+    """Set a custom nickname for a job."""
+    job_dir = os.path.join(JOBS_DIR, job_id)
+    config = _load_config(job_dir)
+    if not config:
+        raise HTTPException(status_code=404, detail="Job not found")
+    nickname = str(body.get('nickname', '')).strip()
+    if nickname:
+        config['nickname'] = nickname
+    else:
+        config.pop('nickname', None)
+    _save_config(job_dir, config)
+    return {"status": "ok", "nickname": config.get('nickname', '')}
 
 
 # ============================================================================
@@ -1078,6 +1204,27 @@ async def upload_ground_truth(job_id: str, gt_frames: List[UploadFile] = File(..
 # ============================================================================
 # Helpers
 # ============================================================================
+
+def _extract_log_summary(job_dir: str, max_lines: int = 35) -> str:
+    """Extract key lines from job logs for AI analysis context."""
+    log_file = os.path.join(job_dir, 'logs.txt')
+    if not os.path.exists(log_file):
+        return "No logs available."
+    with open(log_file) as f:
+        all_lines = [l.strip() for l in f.readlines() if l.strip()]
+    key_patterns = [
+        'checkpoint', 'step ', 'generated rgb frames', 'generated semantic frames',
+        'inference params', 'ssim:', 'psnr:', 'lpips:', 'miou', 'error',
+        'loading stage', 'pipeline loaded', 'complete!', 'input:', 'drn',
+        'decoding', 'saving', 'frames:', 'shape', 'seed',
+    ]
+    key_lines = [l for l in all_lines
+                 if any(p in l.lower() for p in key_patterns)]
+    # Always include first 3 and last 3 lines for context
+    boundary = all_lines[:3] + all_lines[-3:]
+    combined = list(dict.fromkeys(boundary + key_lines))  # deduplicate, preserve order
+    return '\n'.join(combined[:max_lines])
+
 
 def _save_config(job_dir: str, config: dict):
     with open(os.path.join(job_dir, 'config.json'), 'w') as f:

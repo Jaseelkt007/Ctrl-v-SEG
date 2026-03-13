@@ -1,12 +1,12 @@
 #!/bin/bash
-#SBATCH --job-name=stage2_fid_fvd
-#SBATCH --output=/no_backups/s1492/Ctrl-V/logs/stage2_fid_fvd_%j.out
-#SBATCH --error=/no_backups/s1492/Ctrl-V/logs/stage2_fid_fvd_%j.err
+#SBATCH --job-name=stage2_fvd_freezeunet
+#SBATCH --output=/no_backups/s1492/Ctrl-V/logs/stage2_fvd_freezeunet_%j.out
+#SBATCH --error=/no_backups/s1492/Ctrl-V/logs/stage2_fvd_freezeunet_%j.err
 #SBATCH --cpus-per-task=8
-#SBATCH --mem=48G
-#SBATCH --gpus=1
-#SBATCH --partition=highperf
-#SBATCH --time=02:00:00
+#SBATCH --gpus=rtx_a5000:1
+#SBATCH --partition=stud
+#SBATCH --qos=batch
+#SBATCH --time=08:00:00
 
 set -e
 set -u
