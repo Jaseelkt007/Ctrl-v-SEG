@@ -207,7 +207,7 @@ def parse_eval_args():
     parser.add_argument('--output_dir', type=str, required=True)
 
     # Dataset  — validation split, non-overlapping clips by default
-    parser.add_argument('--dataset_name', type=str, default='kitti360_official')
+    parser.add_argument('--dataset_name', type=str, default='kitti360')
     parser.add_argument('--data_root',    type=str, default='')
     parser.add_argument('--clip_length',  type=int, default=25)
     parser.add_argument('--train_H',      type=int, default=192)

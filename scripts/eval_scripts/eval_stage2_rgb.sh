@@ -75,7 +75,7 @@ python tools/eval_stage2_rgb.py \
     --checkpoint_dir "$CHECKPOINT_DIR" \
     --output_dir     "$OUTPUT_DIR" \
     --pretrained_model_name_or_path stabilityai/stable-video-diffusion-img2vid-xt \
-    --dataset_name kitti360_official \
+    --dataset_name kitti360 \
     --data_root "" \
     --clip_length 25 \
     --train_H 192 \
