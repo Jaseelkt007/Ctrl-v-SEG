@@ -353,6 +353,60 @@ def main():
 
         generator = torch.Generator(device=accelerator_device).manual_seed(args.seed) if args.seed else None
 
+        # ── Early stopping ────────────────────────────────────────────────────
+        # State file lives in output_dir (outside checkpoint-XXXXX dirs), so it
+        # persists across --resume_from_checkpoint latest SLURM re-submissions.
+        EARLY_STOP_PATIENCE  = 8      # stop after 8 validations without improvement
+        EARLY_STOP_MIN_DELTA = 0.005  # require at least 0.005 absolute LPIPS drop
+        _es_state_path = os.path.join(args.output_dir, 'early_stop_state.json')
+
+        def _early_stop_check(metric_value, step):
+            """Read/update early_stop_state.json; return (patience_counter, should_stop).
+            metric is LPIPS — lower is better."""
+            import json as _json
+            if os.path.exists(_es_state_path):
+                with open(_es_state_path) as _f:
+                    _s = _json.load(_f)
+            else:
+                _s = {"best_metric": 999.0, "best_step": 0,
+                      "patience_counter": 0, "history": []}
+            _s["history"].append({"step": step, "metric": metric_value})
+            if metric_value < _s["best_metric"] - EARLY_STOP_MIN_DELTA:  # lower LPIPS = better
+                _s["best_metric"] = metric_value
+                _s["best_step"]   = step
+                _s["patience_counter"] = 0
+                # Copy current checkpoint as best_checkpoint
+                _ckpts = sorted(
+                    [d for d in os.listdir(args.output_dir) if d.startswith("checkpoint")],
+                    key=lambda x: int(x.split("-")[1])
+                )
+                if _ckpts:
+                    _src = os.path.join(args.output_dir, _ckpts[-1])
+                    _dst = os.path.join(args.output_dir, "best_checkpoint")
+                    if os.path.exists(_dst):
+                        shutil.rmtree(_dst)
+                    shutil.copytree(_src, _dst)
+                    logger.info(f"Saved best_checkpoint (LPIPS={metric_value:.4f} @ step {step})")
+            else:
+                _s["patience_counter"] += 1
+            with open(_es_state_path, 'w') as _f:
+                _json.dump(_s, _f, indent=2)
+            return _s["patience_counter"], _s["patience_counter"] >= EARLY_STOP_PATIENCE, \
+                   _s["best_metric"], _s["best_step"]
+
+        # LPIPS model for Stage 2 perceptual quality metric
+        try:
+            import lpips as _lpips_lib
+            _lpips_fn = _lpips_lib.LPIPS(net='alex', verbose=False).to(accelerator_device)
+            _lpips_fn.eval()
+            _lpips_available = True
+            logger.info("LPIPS model loaded for validation metric.")
+        except ImportError:
+            _lpips_available = False
+            logger.warning("lpips not available — early stopping will use training loss plateau instead.")
+
+        early_stop_triggered = False
+
         def run_inference_with_pipeline(pipeline, demo_samples, log_dict):
             for sample_i, sample in enumerate(demo_samples):
                 frames = pipeline(sample['image_init'] if not args.generate_bbox else sample['bbox_init'], 
@@ -374,6 +428,20 @@ def main():
                 log_dict["gt_videos"].append(wandb.Video(sample['gt_clip_np'], fps=args.fps))
                 frame_bboxes = wandb_frames_with_bbox(frames, sample['objects_tensors'], (train_dataset.orig_W, train_dataset.orig_H))
                 log_dict["frames_with_bboxes_{}".format(sample_i)] = frame_bboxes
+
+                # LPIPS between generated and GT RGB frames (lower = better perceptual quality)
+                if _lpips_available and 'gt_clip_np' in sample:
+                    try:
+                        _gt_np = sample['gt_clip_np']  # [T, C, H, W] uint8
+                        _T = min(frames.shape[0], _gt_np.shape[0])
+                        # Normalize to [-1, 1] float32
+                        _pred_t = torch.from_numpy(frames[:_T].astype(np.float32)).to(accelerator_device) / 127.5 - 1.0
+                        _gt_t   = torch.from_numpy(_gt_np[:_T].astype(np.float32)).to(accelerator_device) / 127.5 - 1.0
+                        with torch.no_grad():
+                            _lpips_val = _lpips_fn(_pred_t, _gt_t).mean().item()
+                        log_dict.setdefault("val_lpips_per_sample", []).append(_lpips_val)
+                    except Exception as _e:
+                        logger.warning(f"LPIPS computation failed: {_e}")
             return log_dict
         
         for _ in range(first_epoch, args.num_train_epochs):
@@ -406,6 +474,30 @@ def main():
                                 pipeline = pipeline.to(accelerator_device)
                                 pipeline.set_progress_bar_config(disable=True)
                                 log_dict = run_inference_with_pipeline(pipeline, demo_samples, log_dict)
+
+                            # Aggregate LPIPS and run early stopping check
+                            if "val_lpips_per_sample" in log_dict:
+                                _lpips_samples = log_dict.pop("val_lpips_per_sample")
+                                _mean_lpips = float(np.mean(_lpips_samples))
+                                log_dict["val/lpips"] = _mean_lpips
+                                logger.info(f"Validation LPIPS: {_mean_lpips:.4f}")
+
+                                _pc, _stop, _best, _best_step = _early_stop_check(
+                                    _mean_lpips, global_step
+                                )
+                                log_dict["early_stop/patience_counter"] = _pc
+                                log_dict["early_stop/best_lpips"]       = _best
+                                logger.info(
+                                    f"Early stop: patience {_pc}/{EARLY_STOP_PATIENCE}, "
+                                    f"best LPIPS {_best:.4f} @ step {_best_step}"
+                                )
+                                if _stop:
+                                    logger.info(
+                                        f"Early stopping triggered! No LPIPS improvement for "
+                                        f"{EARLY_STOP_PATIENCE} validations. "
+                                        f"Best LPIPS={_best:.4f} @ step {_best_step}"
+                                    )
+                                    early_stop_triggered = True
 
                             for tracker in accelerator.trackers:
                                 if tracker.name == "wandb":
@@ -592,9 +684,13 @@ def main():
                             accelerator.save_state(save_path)
                             logger.info(f"Saved state to {save_path}")
 
-                if global_step >= args.max_train_steps:
+                if global_step >= args.max_train_steps or early_stop_triggered:
                     break
-            
+
+            if early_stop_triggered:
+                logger.info("Exiting epoch loop due to early stopping.")
+                break
+
         accelerator.wait_for_everyone()
         if accelerator.is_main_process:
             with torch.autocast(

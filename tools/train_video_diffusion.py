@@ -466,6 +466,49 @@ def main():
                     log_dict["frames_with_bboxes_{}".format(sample_i)] = frame_bboxes
             return log_dict
 
+        # ── Early stopping ────────────────────────────────────────────────────
+        # State is written to output_dir (not inside checkpoint-XXXXX), so it
+        # survives --resume_from_checkpoint latest across SLURM re-submissions.
+        # Patience is in units of validation events (each = validation_steps steps).
+        EARLY_STOP_PATIENCE   = 6      # stop after 6 validations without improvement
+        EARLY_STOP_MIN_DELTA  = 0.002  # require at least 0.2% absolute mIoU gain
+        _es_state_path = os.path.join(args.output_dir, 'early_stop_state.json')
+
+        def _early_stop_check(metric_value, step):
+            """Read/update early_stop_state.json; return (patience_counter, should_stop)."""
+            import json as _json
+            if os.path.exists(_es_state_path):
+                with open(_es_state_path) as _f:
+                    _s = _json.load(_f)
+            else:
+                _s = {"best_metric": -1.0, "best_step": 0,
+                      "patience_counter": 0, "history": []}
+            _s["history"].append({"step": step, "metric": metric_value})
+            if metric_value > _s["best_metric"] + EARLY_STOP_MIN_DELTA:
+                _s["best_metric"] = metric_value
+                _s["best_step"]   = step
+                _s["patience_counter"] = 0
+                # Copy current checkpoint as best_checkpoint
+                _ckpts = sorted(
+                    [d for d in os.listdir(args.output_dir) if d.startswith("checkpoint")],
+                    key=lambda x: int(x.split("-")[1])
+                )
+                if _ckpts:
+                    _src = os.path.join(args.output_dir, _ckpts[-1])
+                    _dst = os.path.join(args.output_dir, "best_checkpoint")
+                    if os.path.exists(_dst):
+                        shutil.rmtree(_dst)
+                    shutil.copytree(_src, _dst)
+                    logger.info(f"Saved best_checkpoint (mIoU={metric_value:.4f} @ step {step})")
+            else:
+                _s["patience_counter"] += 1
+            with open(_es_state_path, 'w') as _f:
+                _json.dump(_s, _f, indent=2)
+            return _s["patience_counter"], _s["patience_counter"] >= EARLY_STOP_PATIENCE, \
+                   _s["best_metric"], _s["best_step"]
+
+        early_stop_triggered = False
+
         # Latent statistics tracker for scaling factor analysis
         # Tracks running mean/std of semantic latents to compare with RGB VAE scaling factor (0.18215)
         latent_stats = {
@@ -531,13 +574,31 @@ def main():
                                 log_dict["val/pixel_accuracy"] = float(np.mean(pixacc_samples))
                                 logger.info(f"Validation mIoU: {log_dict['val/miou']:.4f}, Pixel Acc: {log_dict['val/pixel_accuracy']:.4f}")
 
+                                # Early stopping (resume-safe via persistent state file)
+                                _pc, _stop, _best, _best_step = _early_stop_check(
+                                    log_dict["val/miou"], global_step
+                                )
+                                log_dict["early_stop/patience_counter"] = _pc
+                                log_dict["early_stop/best_miou"]        = _best
+                                logger.info(
+                                    f"Early stop: patience {_pc}/{EARLY_STOP_PATIENCE}, "
+                                    f"best mIoU {_best:.4f} @ step {_best_step}"
+                                )
+                                if _stop:
+                                    logger.info(
+                                        f"Early stopping triggered! No improvement for "
+                                        f"{EARLY_STOP_PATIENCE} validations. "
+                                        f"Best mIoU={_best:.4f} @ step {_best_step}"
+                                    )
+                                    early_stop_triggered = True
+
                             for tracker in accelerator.trackers:
                                 if tracker.name == "wandb":
                                     tracker.log(log_dict)
                             if args.use_ema:
                                 # Switch back to the original UNet parameters.
                                 ema_unet.restore(unet.parameters())
-                                
+
                             del pipeline, log_dict
                             torch.cuda.empty_cache()
                 
@@ -800,9 +861,13 @@ def main():
                             accelerator.save_state(save_path)
                             logger.info(f"Saved state to {save_path}")
 
-                if global_step >= args.max_train_steps:
+                if global_step >= args.max_train_steps or early_stop_triggered:
                     break
-            
+
+            if early_stop_triggered:
+                logger.info("Exiting epoch loop due to early stopping.")
+                break
+
         # Final latent statistics report
         accelerator.wait_for_everyone()
         if accelerator.is_main_process and latent_stats['count'] > 0:

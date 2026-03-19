@@ -86,7 +86,8 @@ class ModelManager:
                 log_fn(msg)
 
         log("Loading Stage 1 pipeline...")
-        ckpt_path, self.stage1_step = find_latest_checkpoint(STAGE1_CHECKPOINT_DIR)
+        ckpt_path = os.path.join(STAGE1_CHECKPOINT_DIR, 'best_checkpoint')
+        self.stage1_step = 'best'
         log(f"  Checkpoint: {ckpt_path} (step {self.stage1_step})")
 
         from diffusers import EulerDiscreteScheduler

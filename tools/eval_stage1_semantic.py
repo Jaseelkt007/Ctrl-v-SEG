@@ -54,7 +54,7 @@ from diffusers.utils.torch_utils import is_compiled_module
 
 with warnings.catch_warnings():
     warnings.simplefilter("ignore")
-    from ctrlv.utils import get_dataloader, encode_video_image, get_add_time_ids, get_n_training_samples, get_model_attr
+    from ctrlv.utils import get_dataloader, encode_video_image, get_add_time_ids, get_n_training_samples, get_model_attr, eval_samples_generator
     from ctrlv.models import UNetSpatioTemporalConditionModel
     from ctrlv.pipelines import VideoDiffusionPipeline
     from ctrlv.utils.semantic_preprocessing import (
@@ -220,6 +220,34 @@ def save_side_by_side(gt_ids, pred_ids, output_path):
     Image.fromarray(combined).save(output_path)
 
 
+def _save_clip_frames(pred_np, gt_np, video_dir):
+    """Save colorized + grayscale frames for a clip. Returns number of frames saved."""
+    gt_dir = os.path.join(video_dir, 'gt')
+    pred_dir = os.path.join(video_dir, 'pred')
+    compare_dir = os.path.join(video_dir, 'comparison')
+    gt_gray_dir = os.path.join(video_dir, 'gt_grayscale')
+    pred_gray_dir = os.path.join(video_dir, 'pred_grayscale')
+    for d in [gt_dir, pred_dir, compare_dir, gt_gray_dir, pred_gray_dir]:
+        os.makedirs(d, exist_ok=True)
+
+    trainid_to_original = {tid: kid for kid, tid in KITTI360_LABEL_MAPPING.items()}
+    T = min(pred_np.shape[0], gt_np.shape[0])
+    for t in range(T):
+        save_semantic_frame(gt_np[t], os.path.join(gt_dir, f'frame_{t:03d}.png'))
+        save_semantic_frame(pred_np[t], os.path.join(pred_dir, f'frame_{t:03d}.png'))
+        save_side_by_side(gt_np[t], pred_np[t], os.path.join(compare_dir, f'frame_{t:03d}.png'))
+
+        gt_original = np.zeros_like(gt_np[t], dtype=np.uint8)
+        pred_original = np.zeros_like(pred_np[t], dtype=np.uint8)
+        for train_id, orig_id in trainid_to_original.items():
+            gt_original[gt_np[t] == train_id] = orig_id
+            pred_original[pred_np[t] == train_id] = orig_id
+        gt_original[gt_np[t] == 255] = 0
+        Image.fromarray(gt_original, mode='L').save(os.path.join(gt_gray_dir, f'frame_{t:03d}.png'))
+        Image.fromarray(pred_original, mode='L').save(os.path.join(pred_gray_dir, f'frame_{t:03d}.png'))
+    return T
+
+
 def save_legend_image(output_path):
     """Save a class color legend image."""
     try:
@@ -289,7 +317,9 @@ def parse_eval_args():
     parser.add_argument('--save_frames', action='store_true', default=True,
                         help='Save GT and generated frames as PNG')
     parser.add_argument('--num_save_videos', type=int, default=10,
-                        help='Number of videos to save frames for')
+                        help='Number of first-N clips to save frames for (quick reference)')
+    parser.add_argument('--num_worst_videos', type=int, default=20,
+                        help='Number of worst-mIoU clips to save frames for after all inference')
     
     return parser.parse_args()
 
@@ -305,6 +335,10 @@ def main():
     os.makedirs(args.output_dir, exist_ok=True)
     frames_dir = os.path.join(args.output_dir, 'frames')
     os.makedirs(frames_dir, exist_ok=True)
+    tmp_npz_dir = os.path.join(args.output_dir, '_tmp_npz')
+    os.makedirs(tmp_npz_dir, exist_ok=True)
+    worst_dir = os.path.join(args.output_dir, 'worst_clips')
+    os.makedirs(worst_dir, exist_ok=True)
     
     logging.basicConfig(
         format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
@@ -416,7 +450,7 @@ def main():
     print("\n[2/5] Loading validation data...")
     
     train_dataset, train_loader = get_dataloader(
-        args.data_root, args.dataset_name, if_train=True,
+        args.data_root, args.dataset_name, if_train=False,
         clip_length=args.clip_length,
         batch_size=1, num_workers=args.num_workers,
         data_type='clip', use_default_collate=True, tokenizer=None, shuffle=False,
@@ -426,24 +460,25 @@ def main():
         return_semantic_ids=True
     )
     
-    print(f"  Dataset: {len(train_dataset)} clips")
-    print(f"  Evaluating: {args.num_samples} clips")
-    
-    # Collect samples
-    demo_samples = get_n_training_samples(train_loader, args.num_samples, show_progress=True)
-    print(f"  ✓ Collected {len(demo_samples)} validation samples")
-    
+    total_clips = len(train_dataset)
+    num_eval = min(args.num_samples, total_clips)
+    print(f"  Dataset: {total_clips} clips")
+    print(f"  Evaluating: {num_eval} clips  (streaming — no preload)")
+
     # ====================================================================
     # Run Inference & Compute Metrics
     # ====================================================================
     print("\n[3/5] Running inference and computing metrics...")
-    
+
     metrics = SemanticMetrics(num_classes=19, ignore_index=255)
     generator = torch.Generator(device=device).manual_seed(args.seed)
-    
+
     per_sample_results = []
-    
-    for sample_i, sample in enumerate(tqdm(demo_samples, desc="Evaluating")):
+
+    sample_stream = eval_samples_generator(train_loader)
+    for sample_i, sample in enumerate(tqdm(sample_stream, total=num_eval, desc="Evaluating")):
+        if sample_i >= num_eval:
+            break
         # bbox_img is [T, 3, H, W] float32 RGB semantic visualization (from _semantic_ids_to_rgb)
         # semantic_ids is [T, H, W] int64 trainIDs 0-18
         # 
@@ -479,6 +514,8 @@ def main():
         # but pipeline outputs fp16 latents. Without this cast, conv2d fails with
         # "Input type (c10::Half) and bias type (float) should be the same"
         latents = result.frames[0].to(torch.float32)  # [T, C, H, W]
+        del result
+        torch.cuda.empty_cache()
         pred_semantic_ids = vae_manager.decode_semantic(latents)  # [T, H, W] trainIDs 0-18
         pred_np = pred_semantic_ids.cpu().numpy()
         
@@ -505,50 +542,107 @@ def main():
         sample_metrics = SemanticMetrics(num_classes=19, ignore_index=255)
         sample_metrics.update(pred_np, gt_np)
         sample_result = sample_metrics.compute()
+
+        # Extract sequence name and start frame from image_paths
+        seq_name = 'unknown'
+        start_frame = str(sample_i)
+        if 'image_paths' in sample and sample['image_paths']:
+            first_path = str(sample['image_paths'][0])
+            # KITTI-360 path: .../data_2d_raw/2013_05_28_drive_0000_sync/image_00/.../0000000123.png
+            path_parts = Path(first_path).parts
+            seq_candidates = [p for p in path_parts if 'drive' in p]
+            if seq_candidates:
+                seq_name = seq_candidates[0]
+            start_frame = Path(first_path).stem  # e.g. '0000000123'
+
         per_sample_results.append({
             'sample_idx': sample_i,
+            'sequence': seq_name,
+            'start_frame': start_frame,
             'miou': sample_result['miou'],
             'pixel_accuracy': sample_result['overall_accuracy'],
+            'iou_per_class': sample_result['iou_per_class'].tolist(),
         })
-        
-        # Save frames
+
+        # Always save pred/gt as compressed numpy for post-hoc worst-clip selection
+        np.savez_compressed(
+            os.path.join(tmp_npz_dir, f'clip_{sample_i:04d}.npz'),
+            pred=pred_np, gt=gt_np
+        )
+
+        # Save frames for the first num_save_videos clips (quick inline reference)
         if args.save_frames and sample_i < args.num_save_videos:
-            video_dir = os.path.join(frames_dir, f'video_{sample_i:03d}')
-            gt_dir = os.path.join(video_dir, 'gt')
-            pred_dir = os.path.join(video_dir, 'pred')
-            compare_dir = os.path.join(video_dir, 'comparison')
-            gt_gray_dir = os.path.join(video_dir, 'gt_grayscale')
-            pred_gray_dir = os.path.join(video_dir, 'pred_grayscale')
-            os.makedirs(gt_dir, exist_ok=True)
-            os.makedirs(pred_dir, exist_ok=True)
-            os.makedirs(compare_dir, exist_ok=True)
-            os.makedirs(gt_gray_dir, exist_ok=True)
-            os.makedirs(pred_gray_dir, exist_ok=True)
-            
-            # Build reverse mapping: trainID -> original KITTI-360 ID
-            trainid_to_original = {train_id: kitti_id for kitti_id, train_id in KITTI360_LABEL_MAPPING.items()}
-            
-            T = min(pred_np.shape[0], gt_np.shape[0])
-            for t in range(T):
-                # Colorized RGB visualizations
-                save_semantic_frame(gt_np[t], os.path.join(gt_dir, f'frame_{t:03d}.png'))
-                save_semantic_frame(pred_np[t], os.path.join(pred_dir, f'frame_{t:03d}.png'))
-                save_side_by_side(gt_np[t], pred_np[t], os.path.join(compare_dir, f'frame_{t:03d}.png'))
-                
-                # Original grayscale semantic images (KITTI-360 IDs, not trainIDs)
-                gt_original = np.zeros_like(gt_np[t], dtype=np.uint8)
-                pred_original = np.zeros_like(pred_np[t], dtype=np.uint8)
-                for train_id, orig_id in trainid_to_original.items():
-                    gt_original[gt_np[t] == train_id] = orig_id
-                    pred_original[pred_np[t] == train_id] = orig_id
-                # Ignore pixels (255) map to 0 in original (unlabeled)
-                gt_original[gt_np[t] == 255] = 0
-                
-                Image.fromarray(gt_original, mode='L').save(os.path.join(gt_gray_dir, f'frame_{t:03d}.png'))
-                Image.fromarray(pred_original, mode='L').save(os.path.join(pred_gray_dir, f'frame_{t:03d}.png'))
-            
-            print(f"  Saved {T} frames for video {sample_i} (colorized + grayscale)")
+            video_dir = os.path.join(frames_dir, f'video_{sample_i:03d}_{seq_name}_f{start_frame}')
+            n_saved = _save_clip_frames(pred_np, gt_np, video_dir)
+            print(f"  Saved {n_saved} frames for clip {sample_i} ({seq_name} @ {start_frame})")
     
+    # ====================================================================
+    # Identify and Save Worst-Performing Clips
+    # ====================================================================
+    print(f"\n[3b/5] Saving {args.num_worst_videos} worst clips by mIoU...")
+
+    worst_clips = sorted(per_sample_results, key=lambda x: x['miou'])[:args.num_worst_videos]
+
+    worst_report_lines = [
+        "Worst Clips Report",
+        "=" * 80,
+        f"Bottom {args.num_worst_videos} clips by mIoU (ascending order)\n",
+        f"{'Rank':<6} {'ClipIdx':<10} {'Sequence':<35} {'StartFrame':<14} {'mIoU':>8} {'PixAcc':>10}",
+        "-" * 85,
+    ]
+
+    for rank, clip_info in enumerate(worst_clips):
+        clip_idx = clip_info['sample_idx']
+        npz_path = os.path.join(tmp_npz_dir, f'clip_{clip_idx:04d}.npz')
+        seq = clip_info['sequence']
+        sf = clip_info['start_frame']
+        safe_seq = seq.replace('/', '_')[:30]
+        video_dir = os.path.join(
+            worst_dir,
+            f'rank{rank+1:02d}_miou{clip_info["miou"]*100:.1f}_{safe_seq}_f{sf}'
+        )
+        if os.path.exists(npz_path):
+            data = np.load(npz_path)
+            _save_clip_frames(data['pred'], data['gt'], video_dir)
+            # Per-class IoU for this clip
+            iou_arr = np.array(clip_info['iou_per_class'])
+            worst_class_idx = int(np.nanargmin(iou_arr))
+            worst_class_iou = iou_arr[worst_class_idx]
+            worst_class_name = KITTI360_CLASS_NAMES[worst_class_idx]
+            worst_report_lines.append(
+                f"  {rank+1:<4} {clip_idx:<10} {seq:<35} {sf:<14} "
+                f"{clip_info['miou']*100:>7.2f}% {clip_info['pixel_accuracy']*100:>9.2f}%"
+                f"  [worst class: {worst_class_name} {worst_class_iou*100:.1f}%]"
+            )
+            print(f"  [{rank+1:2d}/{args.num_worst_videos}] clip {clip_idx:04d} "
+                  f"({seq}) frame {sf} → mIoU={clip_info['miou']*100:.1f}%")
+        else:
+            print(f"  WARNING: npz not found for clip {clip_idx}")
+
+    # Append per-clip table sorted by mIoU (all clips)
+    worst_report_lines += [
+        "\n" + "=" * 80,
+        "All Clips Sorted by mIoU (ascending)",
+        f"{'Rank':<6} {'ClipIdx':<10} {'Sequence':<35} {'StartFrame':<14} {'mIoU':>8} {'PixAcc':>10}",
+        "-" * 85,
+    ]
+    for rank, clip_info in enumerate(sorted(per_sample_results, key=lambda x: x['miou'])):
+        worst_report_lines.append(
+            f"  {rank+1:<4} {clip_info['sample_idx']:<10} {clip_info['sequence']:<35} "
+            f"{clip_info['start_frame']:<14} {clip_info['miou']*100:>7.2f}% "
+            f"{clip_info['pixel_accuracy']*100:>9.2f}%"
+        )
+
+    worst_report_path = os.path.join(args.output_dir, 'worst_clips_report.txt')
+    with open(worst_report_path, 'w') as f:
+        f.write('\n'.join(worst_report_lines) + '\n')
+    print(f"  Saved worst clips report: {worst_report_path}")
+    print(f"  Worst clip frames: {worst_dir}/")
+
+    # Clean up temporary npz files
+    import shutil
+    shutil.rmtree(tmp_npz_dir, ignore_errors=True)
+
     # ====================================================================
     # Compute Final Metrics
     # ====================================================================
@@ -593,16 +687,20 @@ def main():
     
     print("-" * 80)
     
-    # Per-sample summary
-    print(f"\nPer-Sample Summary:")
-    print(f"{'Sample':<10} {'mIoU':>10} {'Pixel Acc':>12}")
-    print("-" * 34)
-    for r in per_sample_results:
-        print(f"  {r['sample_idx']:<8} {r['miou']*100:>10.2f}% {r['pixel_accuracy']*100:>12.2f}%")
-    
+    # Per-sample summary (sorted by mIoU ascending so bad clips stand out)
+    sorted_results = sorted(per_sample_results, key=lambda x: x['miou'])
+    print(f"\nPer-Sample Summary (sorted by mIoU ascending — worst first):")
+    print(f"{'Rank':<6} {'ClipIdx':<10} {'Sequence':<35} {'StartFrame':<14} {'mIoU':>8} {'PixAcc':>10}")
+    print("-" * 85)
+    for rank, r in enumerate(sorted_results):
+        print(f"  {rank+1:<4} {r['sample_idx']:<10} {r['sequence']:<35} "
+              f"{r['start_frame']:<14} {r['miou']*100:>7.2f}% {r['pixel_accuracy']*100:>9.2f}%")
+
     avg_sample_miou = np.mean([r['miou'] for r in per_sample_results])
     avg_sample_acc = np.mean([r['pixel_accuracy'] for r in per_sample_results])
-    print(f"  {'Average':<8} {avg_sample_miou*100:>10.2f}% {avg_sample_acc*100:>12.2f}%")
+    miou_std = np.std([r['miou'] for r in per_sample_results])
+    print(f"\n  Average mIoU: {avg_sample_miou*100:.2f}% ± {miou_std*100:.2f}%  |  "
+          f"Avg Pixel Acc: {avg_sample_acc*100:.2f}%")
     
     print("\n" + "=" * 80)
     
@@ -622,7 +720,10 @@ def main():
             'frequency_weighted_iou': float(results['fwiou']),
         },
         'per_class': {},
-        'per_sample': per_sample_results,
+        'per_sample': [
+            {k: v for k, v in r.items() if k != 'iou_per_class'}
+            for r in per_sample_results
+        ],
     }
     
     for i, name in enumerate(KITTI360_CLASS_NAMES):
@@ -673,6 +774,14 @@ def main():
             iou = results['iou_per_class'][i]
             iou_str = f"{iou*100:.2f}%" if not np.isnan(iou) else "N/A"
             f.write(f"  {name:<18} {iou_str}\n")
+        f.write(f"\nPer-Clip mIoU Summary (sorted worst first):\n")
+        f.write(f"  {'Rank':<6} {'ClipIdx':<10} {'Sequence':<35} {'StartFrame':<14} {'mIoU':>8} {'PixAcc':>10}\n")
+        f.write(f"  {'-'*80}\n")
+        for rank, r in enumerate(sorted(per_sample_results, key=lambda x: x['miou'])):
+            f.write(f"  {rank+1:<6} {r['sample_idx']:<10} {r['sequence']:<35} "
+                    f"{r['start_frame']:<14} {r['miou']*100:>7.2f}% {r['pixel_accuracy']*100:>9.2f}%\n")
+        miou_std = np.std([r['miou'] for r in per_sample_results])
+        f.write(f"\n  Average mIoU: {avg_sample_miou*100:.2f}% ± {miou_std*100:.2f}%\n")
     print(f"✓ Summary saved to: {summary_path}")
     
     print(f"\n✓ Frames saved to: {frames_dir}/")

@@ -1,6 +1,9 @@
 # run backend : 
 sbatch backend/run_backend.sh
 
+# check ip of backend compute node
+squeue -j <job_id> -h -o "%N" → getent hosts <node> → update .env.local
+
 # run frontend : 
 cd frontend && npm run dev -- -p 3000 -H 0.0.0.0
 

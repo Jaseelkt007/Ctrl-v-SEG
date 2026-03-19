@@ -199,12 +199,27 @@ echo "Finished:         $(date)"
 echo "Duration:         ${HOURS}h ${MINUTES}m ${SECONDS}s"
 echo ""
 echo "Checkpoints:      ${CHECKPOINT_DIR}/"
+echo "Best checkpoint:  ${CHECKPOINT_DIR}/best_checkpoint/"
+echo "Early stop state: ${CHECKPOINT_DIR}/early_stop_state.json"
 echo "Outputs & Plots:  ${OUT_DIR}/"
 echo "SLURM Logs:       ${LOG_DIR}/train_${SLURM_JOB_ID}.{out,err}"
 echo ""
 echo "WandB Project:    ${PROJECT_NAME}"
 echo "WandB URL:        https://wandb.ai/jaseelkt1-university-of-stuttgart/${PROJECT_NAME}/runs/${NAME}"
 echo "========================================="
+echo ""
+# Print early stopping result if available
+if [ -f "${CHECKPOINT_DIR}/early_stop_state.json" ]; then
+    echo "Early stopping summary:"
+    python3 -c "
+import json
+with open('${CHECKPOINT_DIR}/early_stop_state.json') as f:
+    s = json.load(f)
+print(f'  Best LPIPS:      {s[\"best_metric\"]:.4f} @ step {s[\"best_step\"]}')
+print(f'  Patience counter:{s[\"patience_counter\"]} / 8')
+print(f'  Total evals:     {len(s[\"history\"])}')
+"
+fi
 echo ""
 echo "✓ Training completed successfully!"
 echo "This completes the 3-step Ctrl-V training pipeline!"

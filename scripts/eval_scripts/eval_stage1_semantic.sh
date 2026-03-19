@@ -1,13 +1,13 @@
 #!/bin/bash
-#SBATCH --job-name=eval_stage1_sem
-#SBATCH --output=/no_backups/s1492/Ctrl-V/logs/eval_stage1_sem_%j.out
-#SBATCH --error=/no_backups/s1492/Ctrl-V/logs/eval_stage1_sem_%j.err
+#SBATCH --job-name=eval_stage1_sem_full_validation
+#SBATCH --output=/no_backups/s1492/Ctrl-V/logs/eval_stage1_sem_full_validation_%j.out
+#SBATCH --error=/no_backups/s1492/Ctrl-V/logs/eval_stage1_sem_full_validation_%j.err
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=48G
 #SBATCH --gpus=rtx_a5000:1
 #SBATCH --partition=stud
 #SBATCH --qos=batch
-#SBATCH --time=24:00:00
+#SBATCH --time=48:00:00
 
 set -e
 set -u
@@ -46,10 +46,12 @@ CHECKPOINT_DIR="/no_backups/s1492/Ctrl-V/checkpoints/kitti360_semantic_predict_v
 OUTPUT_DIR="/no_backups/s1492/Ctrl-V/outputs/eval_stage1_semantic"
 
 # Number of video clips to evaluate (each clip = 25 frames)
-NUM_SAMPLES=170
+NUM_SAMPLES=487
 
-# Number of videos to save visualized frames for
-NUM_SAVE_VIDEOS=20
+# Number of first-N clips to save inline frames (quick reference)
+NUM_SAVE_VIDEOS=5
+# Number of worst-mIoU clips to save after all inference (for failure analysis)
+NUM_WORST_VIDEOS=20
 
 mkdir -p "$OUTPUT_DIR"
 
@@ -58,7 +60,8 @@ echo "Configuration:"
 echo "  Checkpoint dir:    $CHECKPOINT_DIR"
 echo "  Output dir:        $OUTPUT_DIR"
 echo "  Num eval samples:  $NUM_SAMPLES"
-echo "  Num save videos:   $NUM_SAVE_VIDEOS"
+echo "  Num save videos:   $NUM_SAVE_VIDEOS (first-N inline)"
+echo "  Num worst videos:  $NUM_WORST_VIDEOS (worst by mIoU, post-hoc)"
 echo "  Clip length:       25"
 echo "  Resolution:        192x704"
 echo ""
@@ -89,7 +92,8 @@ python tools/eval_stage1_semantic.py \
     --seed 1234 \
     --num_cond_bbox_frames 1 \
     --save_frames \
-    --num_save_videos $NUM_SAVE_VIDEOS
+    --num_save_videos $NUM_SAVE_VIDEOS \
+    --num_worst_videos $NUM_WORST_VIDEOS
 
 # ============================================================================
 # Post-Evaluation Summary
@@ -113,9 +117,11 @@ echo ""
 echo "Results:"
 echo "  JSON:              ${OUTPUT_DIR}/eval_results.json"
 echo "  Summary:           ${OUTPUT_DIR}/eval_summary.txt"
+echo "  Worst clips report:${OUTPUT_DIR}/worst_clips_report.txt"
 echo "  Confusion matrix:  ${OUTPUT_DIR}/confusion_matrix.png"
-echo "  Frames:            ${OUTPUT_DIR}/frames/"
-echo "  Legend:             ${OUTPUT_DIR}/class_legend.png"
+echo "  First-N frames:    ${OUTPUT_DIR}/frames/"
+echo "  Worst-N frames:    ${OUTPUT_DIR}/worst_clips/"
+echo "  Legend:            ${OUTPUT_DIR}/class_legend.png"
 echo ""
 
 # Print the summary if it exists
