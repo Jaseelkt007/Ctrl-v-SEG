@@ -53,12 +53,6 @@ export default function MetricsDisplay({ metrics }: { metrics: any }) {
     if (iq.lpips !== undefined) imageCards.push({ label: "LPIPS ↓",  value: iq.lpips.toFixed(4) });
   }
 
-  // Video quality cards (FID / FVD)
-  const videoCards: { label: string; value: string }[] = [];
-  if (metrics.fid     != null) videoCards.push({ label: "FID ↓",     value: metrics.fid.toFixed(2) });
-  if (metrics.fvd_i3d != null) videoCards.push({ label: "FVD-I3D ↓", value: metrics.fvd_i3d.toFixed(2) });
-  if (metrics.fvd_videomae != null) videoCards.push({ label: "FVD-VideoMAE ↓", value: metrics.fvd_videomae.toFixed(2) });
-
   const perClass = metrics.per_class || (metrics.drn && metrics.drn.per_class);
 
   return (
@@ -80,21 +74,6 @@ export default function MetricsDisplay({ metrics }: { metrics: any }) {
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             {imageCards.map((c) => <MetricCard key={c.label} {...c} />)}
           </div>
-        </div>
-      )}
-
-      {/* Video quality — FID / FVD */}
-      {videoCards.length > 0 && (
-        <div className="space-y-2">
-          <SectionLabel>Video Quality — FID / FVD (lower is better)</SectionLabel>
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-            {videoCards.map((c) => <MetricCard key={c.label} label={c.label} value={c.value} highlight />)}
-          </div>
-          <p className="text-[10px] text-zinc-600 leading-relaxed">
-            FID uses Inception-v3 features (frame-level). FVD-I3D uses cdfvd/I3D (i3d_pretrained_400.pt, Kinetics400).
-            FVD-VideoMAE uses VideoMAE-Base (MCG-NJU/videomae-base, ViT-B/16). Both FVD scores are computed on a single video —
-            interpret as quality indicators rather than statistically robust estimates.
-          </p>
         </div>
       )}
 

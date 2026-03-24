@@ -225,9 +225,11 @@ def parse_eval_args():
     parser.add_argument('--seed',                 type=int,   default=1234)
 
     # Optional frame saving (disabled by default — saves time)
-    parser.add_argument('--save_frames',    action='store_true', default=False,
-                        help='Save GT/gen RGB frames to disk (slows evaluation)')
+    parser.add_argument('--save_frames',     action='store_true', default=False,
+                        help='Save GT/gen RGB frames for first --num_save_videos clips')
     parser.add_argument('--num_save_videos', type=int, default=10)
+    parser.add_argument('--num_worst_videos', type=int, default=20,
+                        help='Save GT/gen/semantic frames for worst N clips by DRN mIoU')
 
     return parser.parse_args()
 
@@ -248,16 +250,21 @@ def main():
     print("=" * 80)
 
     # ------------------------------------------------------------------ checkpoint
-    checkpoint_dir  = args.checkpoint_dir
-    ckpt_subdirs    = sorted(
-        [d for d in os.listdir(checkpoint_dir) if d.startswith("checkpoint")],
-        key=lambda x: int(x.split("-")[1])
-    )
-    if not ckpt_subdirs:
-        raise ValueError(f"No checkpoints found in {checkpoint_dir}")
-    latest_ckpt = ckpt_subdirs[-1]
-    ckpt_path   = os.path.join(checkpoint_dir, latest_ckpt)
-    ckpt_step   = int(latest_ckpt.split("-")[1])
+    checkpoint_dir = args.checkpoint_dir
+    best_ckpt_path = os.path.join(checkpoint_dir, 'best_checkpoint')
+    if os.path.exists(best_ckpt_path):
+        ckpt_path = best_ckpt_path
+        ckpt_step = 'best'
+    else:
+        ckpt_subdirs = sorted(
+            [d for d in os.listdir(checkpoint_dir) if d.startswith("checkpoint")],
+            key=lambda x: int(x.split("-")[1])
+        )
+        if not ckpt_subdirs:
+            raise ValueError(f"No checkpoints found in {checkpoint_dir}")
+        latest_ckpt = ckpt_subdirs[-1]
+        ckpt_path   = os.path.join(checkpoint_dir, latest_ckpt)
+        ckpt_step   = int(latest_ckpt.split("-")[1])
 
     print(f"Checkpoint:      {ckpt_path}  (step {ckpt_step})")
     print(f"Output:          {args.output_dir}")
@@ -277,7 +284,7 @@ def main():
     unet    = UNetSpatioTemporalConditionModel.from_pretrained(
         ckpt_path, subfolder="unet", low_cpu_mem_usage=True, num_frames=args.clip_length
     )
-    print(f"  ✓ ControlNet + UNet loaded from {latest_ckpt}")
+    print(f"  ✓ ControlNet + UNet loaded from {ckpt_path}  (step {ckpt_step})")
 
     from diffusers.models import AutoencoderKLTemporalDecoder
     from transformers import CLIPImageProcessor, CLIPVisionModelWithProjection
@@ -381,10 +388,13 @@ def main():
     fid_gen_dir = os.path.join(fid_temp, 'gen'); os.makedirs(fid_gen_dir, exist_ok=True)
     fid_frame_idx = 0
 
-    # Optional frame saving
-    frames_dir = os.path.join(args.output_dir, 'frames')
+    # Frame saving dirs
+    frames_dir      = os.path.join(args.output_dir, 'frames')
+    worst_tmp_dir   = os.path.join(args.output_dir, '_tmp_clips')   # temp storage for worst-clip frames
+    worst_clips_dir = os.path.join(args.output_dir, 'worst_clips')
     if args.save_frames:
         os.makedirs(frames_dir, exist_ok=True)
+    os.makedirs(worst_tmp_dir, exist_ok=True)
     trainid_to_original = {tid: kid for kid, tid in KITTI360_LABEL_MAPPING.items()}
 
     sample_stream = eval_samples_generator(val_loader)
@@ -468,17 +478,44 @@ def main():
         all_gt_frames.append(sample_video_frames(gt_frames_hwc))
         all_gen_frames.append(sample_video_frames(gen_frames_hwc))
 
+        # Extract sequence name and start frame from image_paths
+        seq_name    = 'unknown'
+        start_frame = str(sample_i)
+        if 'image_paths' in sample and sample['image_paths']:
+            try:
+                first_path = sample['image_paths'][0]
+                parts = first_path.replace('\\', '/').split('/')
+                seq_name    = next((p for p in parts if 'sync' in p), 'unknown')
+                start_frame = os.path.splitext(os.path.basename(first_path))[0]
+            except Exception:
+                pass
+
         per_sample_results.append({
-            'sample_idx':        sample_i,
-            'drn_miou':          s['miou'],
+            'sample_idx':         sample_i,
+            'sequence':           seq_name,
+            'start_frame':        start_frame,
+            'drn_miou':           s['miou'],
             'drn_pixel_accuracy': s['overall_accuracy'],
-            'lpips':             lpips_val,
+            'lpips':              lpips_val,
         })
 
-        # -- Optional frame saving --
+        # -- Save frames to temp dir for worst-clip selection later --
+        tmp_clip_dir = os.path.join(worst_tmp_dir, f'clip_{sample_i:04d}')
+        os.makedirs(tmp_clip_dir, exist_ok=True)
+        for t in range(T_clip):
+            Image.fromarray(gt_frames_hwc[t]).save(
+                os.path.join(tmp_clip_dir, f'gt_{t:03d}.png'))
+            Image.fromarray(gen_frames_hwc[t]).save(
+                os.path.join(tmp_clip_dir, f'gen_{t:03d}.png'))
+            Image.fromarray(semantic_ids_to_viz_rgb(gt_sem_np[t])).save(
+                os.path.join(tmp_clip_dir, f'gtsem_{t:03d}.png'))
+            Image.fromarray(semantic_ids_to_viz_rgb(drn_pred[t])).save(
+                os.path.join(tmp_clip_dir, f'drnsem_{t:03d}.png'))
+
+        # -- Optional inline frame saving for first N clips --
         if args.save_frames and sample_i < args.num_save_videos:
-            video_dir  = os.path.join(frames_dir, f'video_{sample_i:03d}')
-            gt_rgb_dir = os.path.join(video_dir, 'gt_rgb')
+            video_dir   = os.path.join(frames_dir, f'video_{sample_i:03d}')
+            gt_rgb_dir  = os.path.join(video_dir, 'gt_rgb')
             gen_rgb_dir = os.path.join(video_dir, 'gen_rgb')
             gt_sem_dir  = os.path.join(video_dir, 'gt_semantic')
             drn_sem_dir = os.path.join(video_dir, 'drn_semantic')
@@ -496,6 +533,35 @@ def main():
 
     n_evaluated = len(per_sample_results)
     print(f"\n  Inference done. {n_evaluated} clips, {fid_frame_idx} frame pairs collected for FID.")
+
+    # ====================================================================
+    # [3b/5] Save worst-performing clips by DRN mIoU
+    # ====================================================================
+    print(f"\n[3b/5] Saving {args.num_worst_videos} worst clips by DRN mIoU...")
+    os.makedirs(worst_clips_dir, exist_ok=True)
+    worst_clips = sorted(per_sample_results, key=lambda x: x['drn_miou'])[:args.num_worst_videos]
+    for rank, clip_info in enumerate(worst_clips):
+        idx = clip_info['sample_idx']
+        tmp_dir = os.path.join(worst_tmp_dir, f'clip_{idx:04d}')
+        if not os.path.isdir(tmp_dir):
+            continue
+        seq   = clip_info['sequence'].replace('/', '_')[:30]
+        sf    = clip_info['start_frame']
+        dst   = os.path.join(worst_clips_dir,
+                             f'rank{rank+1:02d}_drn{clip_info["drn_miou"]*100:.1f}_{seq}_f{sf}')
+        os.makedirs(dst, exist_ok=True)
+        for subdir, prefix in [('gt_rgb', 'gt'), ('gen_rgb', 'gen'),
+                                ('gt_semantic', 'gtsem'), ('drn_semantic', 'drnsem')]:
+            out_sub = os.path.join(dst, subdir)
+            os.makedirs(out_sub, exist_ok=True)
+            T_frames = len([f for f in os.listdir(tmp_dir) if f.startswith(prefix + '_')])
+            for t in range(T_frames):
+                src_f = os.path.join(tmp_dir, f'{prefix}_{t:03d}.png')
+                if os.path.exists(src_f):
+                    shutil.copy2(src_f, os.path.join(out_sub, f'frame_{t:03d}.png'))
+    # Clean up temp dir
+    shutil.rmtree(worst_tmp_dir, ignore_errors=True)
+    print(f"  Worst clips saved to: {worst_clips_dir}")
 
     # ====================================================================
     # [4/5] Global image/video metrics  (FID, FVD-I3D, FVD-VideoMAE)
@@ -689,6 +755,15 @@ def main():
         for i, name in enumerate(class_names):
             iou = drn_results['iou_per_class'][i]
             f.write(f"  {name:<18} {'N/A' if np.isnan(iou) else f'{iou*100:.2f}%'}\n")
+
+        f.write(f"\nPer-Clip DRN mIoU Summary (sorted worst first):\n")
+        f.write(f"  {'Rank':<6} {'ClipIdx':<10} {'Sequence':<35} {'StartFrame':<14} {'DRN mIoU':>9} {'PixAcc':>9} {'LPIPS':>8}\n")
+        f.write(f"  {'-'*95}\n")
+        for rank, r in enumerate(sorted(per_sample_results, key=lambda x: x['drn_miou'])):
+            lpips_str = f"{r['lpips']:.4f}" if r['lpips'] is not None else '   N/A'
+            f.write(f"  {rank+1:<6} {r['sample_idx']:<10} {r['sequence']:<35} "
+                    f"{r['start_frame']:<14} {r['drn_miou']*100:>8.2f}% "
+                    f"{r['drn_pixel_accuracy']*100:>8.2f}%  {lpips_str}\n")
     print(f"✓ Summary saved:         {summary_path}")
     print("\n✓ Evaluation complete!")
 

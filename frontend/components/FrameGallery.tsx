@@ -1,5 +1,6 @@
 "use client";
 
+import { RefObject } from "react";
 import { getFrameUrl } from "@/lib/api";
 
 export default function FrameGallery({
@@ -7,11 +8,15 @@ export default function FrameGallery({
   subdir,
   files,
   label,
+  containerRef,
+  onScroll,
 }: {
   jobId: string;
   subdir: string;
   files: string[];
   label?: string;
+  containerRef?: RefObject<HTMLDivElement>;
+  onScroll?: (e: React.UIEvent<HTMLDivElement>) => void;
 }) {
   if (!files || files.length === 0) return null;
 
@@ -22,7 +27,7 @@ export default function FrameGallery({
           {label}
         </h4>
       )}
-      <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-thin">
+      <div ref={containerRef} onScroll={onScroll} className="flex gap-2 overflow-x-auto pb-2 scrollbar-thin">
         {files.map((file) => (
           <img
             key={file}

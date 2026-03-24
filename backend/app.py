@@ -180,6 +180,60 @@ async def get_dataset_samples(count: int = 20):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/api/dataset/sample/{index}")
+async def get_dataset_sample_by_index(index: int):
+    """Get a single sample by index (clip index matches eval ClipIdx).
+    Uses dataset.__getitem__ directly — no dataloader iteration, no OOM."""
+    mgr = get_model_manager()
+    try:
+        mgr.load_dataset()
+        dataset = mgr.dataset
+        total = len(dataset)
+        if index < 0 or index >= total:
+            raise HTTPException(status_code=400, detail=f"Index {index} out of range [0, {total})")
+
+        thumb_dir = os.path.join(JOBS_DIR, '_thumbnails')
+        os.makedirs(thumb_dir, exist_ok=True)
+
+        # RGB init frame: just open the file directly — no tensor loading needed
+        rgb_path = None
+        try:
+            frame_file = dataset.get_frame_file_by_index(index, 0)
+            img = Image.open(frame_file).convert('RGB')
+            img = img.resize((dataset.train_W, dataset.train_H))
+            rgb_path = os.path.join(thumb_dir, f'sample_{index}_rgb.jpg')
+            img.save(rgb_path, quality=80)
+        except Exception:
+            pass
+
+        # Semantic first frame: call __getitem__ directly on the single clip
+        sem_path = None
+        num_frames = 0
+        try:
+            from ctrlv.utils.semantic_preprocessing import semantic_ids_to_viz_rgb
+            result = dataset.__getitem__(index, return_calib=True)
+            # result is (clip, gt_labels, ..., bbox_img, semantic_ids) when return_semantic_ids=True
+            semantic_ids = result[-1]  # last element is semantic_ids [T, H, W]
+            num_frames = semantic_ids.shape[0]
+            sem_viz = semantic_ids_to_viz_rgb(semantic_ids[0].numpy())
+            sem_path = os.path.join(thumb_dir, f'sample_{index}_sem.jpg')
+            Image.fromarray(sem_viz).save(sem_path, quality=80)
+        except Exception:
+            pass
+
+        return {
+            'index': index,
+            'total': total,
+            'num_frames': num_frames,
+            'rgb_thumb': f'/api/thumbnails/sample_{index}_rgb.jpg' if rgb_path else None,
+            'sem_thumb': f'/api/thumbnails/sample_{index}_sem.jpg' if sem_path else None,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/thumbnails/{filename}")
 async def get_thumbnail(filename: str):
     path = os.path.join(JOBS_DIR, '_thumbnails', filename)
@@ -254,6 +308,41 @@ async def stage1_generate(
     return {"job_id": job_id, "status": "queued"}
 
 
+def _load_dataset_sample_direct(dataset, index):
+    """Load a single dataset sample by direct __getitem__ — no dataloader, no OOM.
+
+    Returns:
+        image_init: PIL Image (first RGB frame)
+        semantic_ids: [T, H, W] int64 tensor
+        bbox_img: [T, 3, H, W] float32 tensor
+        gt_rgb_frames: list of PIL Images (all T RGB frames, for GT display)
+    """
+    import torch
+    # All RGB frame paths — cheap list lookup, no tensor loading
+    all_frame_files = dataset.get_frame_file_by_index(index, timestep=None)
+    image_init = Image.open(all_frame_files[0]).convert('RGB').resize((dataset.train_W, dataset.train_H))
+    gt_rgb_frames = [
+        Image.open(f).convert('RGB').resize((dataset.train_W, dataset.train_H))
+        for f in all_frame_files
+    ]
+
+    # Semantic/bbox: direct __getitem__ call (loads one clip only)
+    result = dataset.__getitem__(index, return_calib=True)
+    # With return_semantic_ids=True, result is a 7-tuple:
+    # (clip, gt_labels, something, cam_to_img, something, bbox_img, semantic_ids)
+    if len(result) == 7:
+        bbox_img = result[5]
+        semantic_ids = result[6]
+    else:
+        bbox_img = result[5]
+        semantic_ids = torch.zeros(25, dataset.train_H, dataset.train_W, dtype=torch.long)
+
+    if bbox_img.dtype != torch.float32:
+        bbox_img = bbox_img.float()
+
+    return image_init, semantic_ids, bbox_img, gt_rgb_frames
+
+
 async def _run_stage1_job(job_id: str, config: dict, loop):
     """Run Stage 1 generation in background."""
     job_dir = os.path.join(JOBS_DIR, job_id)
@@ -271,13 +360,10 @@ async def _run_stage1_job(job_id: str, config: dict, loop):
         if config.get('sample_index') is not None:
             await send_log(job_id, f"Loading dataset sample {config['sample_index']}...")
             mgr.load_dataset(log_fn)
-            from ctrlv.utils import get_n_training_samples
-            samples = get_n_training_samples(mgr.dataloader, config['sample_index'] + 1, show_progress=False)
-            sample = samples[config['sample_index']]
-            image_init = sample['image_init']
-            semantic_ids = sample['semantic_ids']
-            bbox_img = sample['bbox_img']
-            gt_semantic_ids = sample['semantic_ids'].numpy()
+            image_init, semantic_ids, bbox_img, _ = _load_dataset_sample_direct(
+                mgr.dataset, config['sample_index']
+            )
+            gt_semantic_ids = semantic_ids.numpy()
         else:
             await send_log(job_id, "Using uploaded image...")
             img_path = os.path.join(job_dir, 'input_image.png')
@@ -453,14 +539,10 @@ async def _run_stage2_job(job_id: str, config: dict, loop):
         if config.get('sample_index') is not None:
             await send_log(job_id, f"Loading dataset sample {config['sample_index']}...")
             mgr.load_dataset(log_fn)
-            from ctrlv.utils import get_n_training_samples
-            samples = get_n_training_samples(mgr.dataloader, config['sample_index'] + 1, show_progress=False)
-            sample = samples[config['sample_index']]
-            image_init = sample['image_init']
-            semantic_ids = sample['semantic_ids']
-            bbox_img = sample['bbox_img']
-            gt_clip_np = sample.get('gt_clip_np', None)
-            gt_semantic_ids = sample['semantic_ids'].numpy()
+            image_init, semantic_ids, bbox_img, gt_rgb_frames = _load_dataset_sample_direct(
+                mgr.dataset, config['sample_index']
+            )
+            gt_semantic_ids = semantic_ids.numpy()
         elif config.get('control_job_id'):
             await send_log(job_id, f"Using control frames from job {config['control_job_id']}...")
             ctrl_dir = os.path.join(JOBS_DIR, config['control_job_id'])
@@ -491,8 +573,22 @@ async def _run_stage2_job(job_id: str, config: dict, loop):
             else:
                 raise ValueError("No input RGB image found")
 
-            gt_clip_np = None
+            # Try to load GT from the Stage 1 job's original dataset sample
+            gt_rgb_frames = None
             gt_semantic_ids = None
+            ctrl_config = _load_config(ctrl_dir)
+            ctrl_sample_index = ctrl_config.get('sample_index') if ctrl_config else None
+            if ctrl_sample_index is not None:
+                await send_log(job_id, f"Loading GT RGB from dataset sample {ctrl_sample_index}...")
+                mgr.load_dataset(log_fn)
+                _, _, _, gt_rgb_frames_loaded = _load_dataset_sample_direct(
+                    mgr.dataset, ctrl_sample_index
+                )
+                gt_rgb_frames = gt_rgb_frames_loaded
+            # Also copy gt_semantic_ids from Stage 1 job if available
+            ctrl_gt_sem_path = os.path.join(ctrl_dir, 'gt_semantic_ids.npy')
+            if os.path.exists(ctrl_gt_sem_path):
+                gt_semantic_ids = np.load(ctrl_gt_sem_path)
         else:
             raise ValueError("Must provide either sample_index or control_job_id")
 
@@ -527,14 +623,12 @@ async def _run_stage2_job(job_id: str, config: dict, loop):
             Image.fromarray(frame).save(os.path.join(gen_dir, f'frame_{t:03d}.png'))
             gif_frames.append(frame)
 
-        # Save GT RGB if available
-        if gt_clip_np is not None:
+        # Save GT RGB if available (PIL images loaded directly from disk — no tensor overhead)
+        if gt_rgb_frames is not None:
             gt_dir = os.path.join(frames_dir, 'gt_rgb')
             os.makedirs(gt_dir, exist_ok=True)
-            gt_hwc = np.transpose(gt_clip_np, (0, 2, 3, 1))
-            for t in range(gt_hwc.shape[0]):
-                Image.fromarray(gt_hwc[t]).save(os.path.join(gt_dir, f'frame_{t:03d}.png'))
-            np.save(os.path.join(job_dir, 'gt_frames.npy'), gt_hwc)
+            for t, frame_pil in enumerate(gt_rgb_frames):
+                frame_pil.save(os.path.join(gt_dir, f'frame_{t:03d}.png'))
 
         # Save semantic conditioning frames
         if gt_semantic_ids is not None:
@@ -877,7 +971,7 @@ async def _run_evaluation(job_id: str, config: dict, loop):
             # Stage 2 evaluation: DRN mIoU + image quality metrics
             gen_path = os.path.join(job_dir, 'gen_frames.npy')
             gt_sem_path = os.path.join(job_dir, 'gt_semantic_ids.npy')
-            gt_rgb_path = os.path.join(job_dir, 'gt_frames.npy')
+            gt_rgb_dir = os.path.join(job_dir, 'frames', 'gt_rgb')
 
             if not os.path.exists(gen_path):
                 await send_log(job_id, "No generated frames found.")
@@ -895,41 +989,22 @@ async def _run_evaluation(job_id: str, config: dict, loop):
                 )
                 metrics['drn'] = drn_metrics
 
-            # Image quality metrics
-            if os.path.exists(gt_rgb_path):
-                gt_rgb = np.load(gt_rgb_path)
-                await send_log(job_id, "Computing image quality metrics (SSIM, PSNR, LPIPS)...")
-                img_metrics = await loop.run_in_executor(
-                    None, lambda: mgr.compute_image_metrics(gt_rgb, gen_frames, log_fn)
-                )
-                metrics['image_quality'] = img_metrics
-
-                # FID
-                await send_log(job_id, "Computing FID (Inception-v3, torch-fidelity)...")
-                fid_val = await loop.run_in_executor(
-                    None, lambda: _compute_fid(gt_rgb, gen_frames, log_fn)
-                )
-                if fid_val is not None:
-                    metrics['fid'] = fid_val
-                    await send_log(job_id, f"FID (Inception-v3): {fid_val:.4f}")
-
-                # FVD-I3D
-                await send_log(job_id, "Computing FVD-I3D (I3D backbone)...")
-                fvd_i3d_val = await loop.run_in_executor(
-                    None, lambda: _compute_fvd_i3d(gt_rgb, gen_frames, log_fn)
-                )
-                if fvd_i3d_val is not None:
-                    metrics['fvd_i3d'] = fvd_i3d_val
-                    await send_log(job_id, f"FVD-I3D: {fvd_i3d_val:.4f}")
-
-                # FVD-VideoMAE
-                await send_log(job_id, "Computing FVD-VideoMAE (VideoMAE-Base / MCG-NJU)...")
-                fvd_vmae_val = await loop.run_in_executor(
-                    None, lambda: _compute_fvd_videomae(gt_rgb, gen_frames, log_fn)
-                )
-                if fvd_vmae_val is not None:
-                    metrics['fvd_videomae'] = fvd_vmae_val
-                    await send_log(job_id, f"FVD-VideoMAE: {fvd_vmae_val:.4f}")
+            # Image quality metrics — load GT RGB from saved PNGs
+            if os.path.exists(gt_rgb_dir):
+                gt_png_files = sorted([
+                    f for f in os.listdir(gt_rgb_dir) if f.endswith('.png')
+                ])
+                if gt_png_files:
+                    gt_rgb = np.stack([
+                        np.array(Image.open(os.path.join(gt_rgb_dir, f)).convert('RGB'))
+                        for f in gt_png_files
+                    ])  # [T, H, W, 3] uint8
+                    await send_log(job_id, "Computing image quality metrics (SSIM, PSNR, LPIPS)...")
+                    img_metrics = await loop.run_in_executor(
+                        None, lambda: mgr.compute_image_metrics(gt_rgb, gen_frames, log_fn)
+                    )
+                    metrics['image_quality'] = img_metrics
+                    del gt_rgb  # free memory immediately after use
 
         # Save metrics
         metrics_path = os.path.join(job_dir, 'eval_results.json')

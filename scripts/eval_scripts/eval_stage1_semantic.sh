@@ -39,7 +39,7 @@ nvidia-smi --query-gpu=memory.used,memory.free,memory.total --format=csv
 # Evaluation Configuration
 # ============================================================================
 
-# Stage 1 checkpoint directory (will auto-detect latest checkpoint inside)
+# Stage 1 checkpoint directory (will auto-detect best checkpoint, fallback to latest)
 CHECKPOINT_DIR="/no_backups/s1492/Ctrl-V/checkpoints/kitti360_semantic_predict_vae"
 
 # Output directory for evaluation results

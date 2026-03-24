@@ -42,12 +42,13 @@ nvidia-smi --query-gpu=name,memory.used,memory.free,memory.total --format=csv
 # Configuration  —  edit these two lines to switch checkpoints
 # ============================================================================
 
-CHECKPOINT_DIR="/no_backups/s1492/Ctrl-V/checkpoints/kitti360_sem2video_unet_unfreeze"
-OUTPUT_DIR="/no_backups/s1492/Ctrl-V/outputs/eval_stage2_rgb_unet_unfreeze"
+CHECKPOINT_DIR="/no_backups/s1492/Ctrl-V/checkpoints/kitti360_sem2video_unet_unfreeze_reinject"
+OUTPUT_DIR="/no_backups/s1492/Ctrl-V/outputs/eval_stage2_rgb_unet_unfreeze_reinject"
 
 # Evaluate the full non-overlapping val set (487 clips from 9 sequences).
 # Reduce NUM_SAMPLES for a quick smoke-test (e.g. 20).
 NUM_SAMPLES=487
+NUM_WORST_VIDEOS=20
 
 DRN_DIR="/usrhomes/s1492/drn"
 DRN_CHECKPOINT="/usrhomes/s1492/drn/KITTI360_checkpoints/checkpoint_030.pth.tar"
@@ -92,7 +93,8 @@ python tools/eval_stage2_rgb.py \
     --drn_dir        "$DRN_DIR" \
     --drn_checkpoint "$DRN_CHECKPOINT" \
     --drn_info_json  "$DRN_INFO_JSON" \
-    --drn_arch drn_d_105
+    --drn_arch drn_d_105 \
+    --num_worst_videos $NUM_WORST_VIDEOS
 
 # ============================================================================
 # Post-run summary

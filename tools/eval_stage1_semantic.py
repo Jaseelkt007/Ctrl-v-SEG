@@ -366,18 +366,27 @@ def main():
     # ====================================================================
     print("\n[1/5] Loading models...")
     
-    # Find latest checkpoint
+    # Find best checkpoint first, then fall back to latest checkpoint
     checkpoint_dir = args.checkpoint_dir
-    checkpoint_subdirs = [d for d in os.listdir(checkpoint_dir) if d.startswith("checkpoint")]
-    if checkpoint_subdirs:
-        checkpoint_subdirs = sorted(checkpoint_subdirs, key=lambda x: int(x.split("-")[1]))
-        latest_ckpt = checkpoint_subdirs[-1]
-        ckpt_path = os.path.join(checkpoint_dir, latest_ckpt)
-        ckpt_step = int(latest_ckpt.split("-")[1])
-        print(f"  Using checkpoint: {latest_ckpt} (step {ckpt_step})")
+    
+    # Check for best_checkpoint first
+    best_ckpt_path = os.path.join(checkpoint_dir, "best_checkpoint")
+    if os.path.exists(best_ckpt_path):
+        ckpt_path = best_ckpt_path
+        ckpt_step = "best"
+        print(f"  Using best checkpoint: best_checkpoint")
     else:
-        print(f"  ERROR: No checkpoints found in {checkpoint_dir}")
-        return
+        # Fall back to latest numbered checkpoint
+        checkpoint_subdirs = [d for d in os.listdir(checkpoint_dir) if d.startswith("checkpoint")]
+        if checkpoint_subdirs:
+            checkpoint_subdirs = sorted(checkpoint_subdirs, key=lambda x: int(x.split("-")[1]))
+            latest_ckpt = checkpoint_subdirs[-1]
+            ckpt_path = os.path.join(checkpoint_dir, latest_ckpt)
+            ckpt_step = int(latest_ckpt.split("-")[1])
+            print(f"  Using latest checkpoint: {latest_ckpt} (step {ckpt_step})")
+        else:
+            print(f"  ERROR: No checkpoints found in {checkpoint_dir}")
+            return
     
     # Load base models
     noise_scheduler = EulerDiscreteScheduler.from_pretrained(

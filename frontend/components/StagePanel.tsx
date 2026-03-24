@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useRef, useEffect, RefObject } from "react";
 import { clsx } from "clsx";
 import {
   startStage1,
@@ -11,6 +11,7 @@ import {
   getGifUrl,
   getDownloadUrl,
   getDatasetSamples,
+  getDatasetSampleByIndex,
   getThumbnailUrl,
   pollLogs,
   analyseJob,
@@ -98,6 +99,16 @@ export default function StagePanel({ stage, initialConfig }: { stage: 1 | 2; ini
   const evalPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const logOffsetRef = useRef(0);
   const gtInputRef = useRef<HTMLInputElement>(null);
+  const predScrollRef = useRef<HTMLDivElement>(null);
+  const gtScrollRef = useRef<HTMLDivElement>(null);
+
+  const handlePredScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
+    if (gtScrollRef.current) gtScrollRef.current.scrollLeft = (e.target as HTMLDivElement).scrollLeft;
+  }, []);
+
+  const handleGtScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
+    if (predScrollRef.current) predScrollRef.current.scrollLeft = (e.target as HTMLDivElement).scrollLeft;
+  }, []);
 
   const addLog = useCallback((msg: string, type?: "error" | "success") => {
     setLogs((prev) => [...prev, { message: msg, type }]);
@@ -216,14 +227,11 @@ export default function StagePanel({ stage, initialConfig }: { stage: 1 | 2; ini
     setIsPreviewing(true);
     setSamplePreview(null);
     try {
-      const data = await getDatasetSamples(sampleIndex + 1);
-      const s = data.samples[sampleIndex];
-      if (s) {
-        setSamplePreview({
-          rgb: s.rgb_thumb ? getThumbnailUrl(s.rgb_thumb) : undefined,
-          sem: s.sem_thumb ? getThumbnailUrl(s.sem_thumb) : undefined,
-        });
-      }
+      const s = await getDatasetSampleByIndex(sampleIndex);
+      setSamplePreview({
+        rgb: s.rgb_thumb ? getThumbnailUrl(s.rgb_thumb) : undefined,
+        sem: s.sem_thumb ? getThumbnailUrl(s.sem_thumb) : undefined,
+      });
     } catch (e) {
       addLog(`Preview failed: ${e}`, "error");
     } finally {
@@ -947,6 +955,8 @@ export default function StagePanel({ stage, initialConfig }: { stage: 1 | 2; ini
                   subdir={genDir}
                   files={result.frame_dirs[genDir]}
                   label={stage === 1 ? "Predicted Semantic" : "Generated RGB"}
+                  containerRef={predScrollRef as RefObject<HTMLDivElement>}
+                  onScroll={handlePredScroll}
                 />
               )}
 
@@ -958,6 +968,8 @@ export default function StagePanel({ stage, initialConfig }: { stage: 1 | 2; ini
                     subdir={gtDir}
                     files={result.frame_dirs[gtDir]}
                     label="Ground Truth"
+                    containerRef={gtScrollRef as RefObject<HTMLDivElement>}
+                    onScroll={handleGtScroll}
                   />
                 </div>
               )}

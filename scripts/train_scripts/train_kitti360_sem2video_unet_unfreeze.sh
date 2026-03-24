@@ -1,7 +1,7 @@
 #!/bin/bash
-#SBATCH --job-name=S2_unet_unfreeze
-#SBATCH --output=/no_backups/s1492/Ctrl-V/logs/train_s2_unet_unfreeze_%j.out
-#SBATCH --error=/no_backups/s1492/Ctrl-V/logs/train_s2_unet_unfreeze_%j.err
+#SBATCH --job-name=S2_unet_unfreeze_reinject
+#SBATCH --output=/no_backups/s1492/Ctrl-V/logs/train_s2_unet_unfreeze_reinject_%j.out
+#SBATCH --error=/no_backups/s1492/Ctrl-V/logs/train_s2_unet_unfreeze_reinject_%j.err
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=48G
 #SBATCH --gpus=1
@@ -62,7 +62,7 @@ nvidia-smi --query-gpu=memory.used,memory.free,memory.total --format=csv
 # ============================================================================
 
 DATASET="kitti360"
-NAME="kitti360_sem2video_unet_unfreeze"
+NAME="kitti360_sem2video_unet_unfreeze_reinject"
 
 FINETUNED_SVD_PATH=""
 PRETRAINED_MODEL_NAME_OR_PATH="stabilityai/stable-video-diffusion-img2vid-xt"
@@ -157,6 +157,7 @@ CUDA_LAUNCH_BLOCKING=1 accelerate launch \
     --train_H 192 \
     --train_W 704 \
     --dataloader_num_workers 8 \
+    # --resume_from_checkpoint latest \
     $( [ -n "$FINETUNED_SVD_PATH" ] && echo "--finetuned_svd_path $FINETUNED_SVD_PATH" )
 
 # ============================================================================
