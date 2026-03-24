@@ -55,7 +55,7 @@
   <text x="215" y="477" text-anchor="middle" class="body">flattened clip batch</text>
 
   <rect x="90" y="540" width="250" height="154" class="box trainable"/>
-  <text x="215" y="572" text-anchor="middle" class="label">Semantic Jump</text>
+  <text x="215" y="572" text-anchor="middle" class="label">Semantic Stem</text>
   <text x="215" y="600" text-anchor="middle" class="label"><tspan font-family="monospace">19 → 64 → 128</tspan></text>
   <text x="215" y="626" text-anchor="middle" class="body">Conv → GN → SiLU → Conv</text>
   <text x="215" y="652" text-anchor="middle" class="body">input projection replacement</text>
@@ -136,7 +136,7 @@
   <!-- flow arrows left -->
   <path d="M 215 354 L 215 400" class="arrow"/>
   <path d="M 215 494 L 215 540" class="arrow"/>
-  <path d="M 340 617 L 430 617" class="arrow"/>
+  <path d="M 340 617 L 400 617 L 400 307 L 430 307" class="arrow"/>
 
   <path d="M 555 354 L 555 400" class="arrow"/>
   <path d="M 555 494 L 555 540" class="arrow"/>
@@ -162,6 +162,10 @@
   <text x="1600" y="292" text-anchor="middle" class="label">Clip Reconstruction</text>
   <text x="1600" y="318" text-anchor="middle" class="body"><tspan font-family="monospace">reshape</tspan></text>
   <text x="1600" y="340" text-anchor="middle" class="body"><tspan font-family="monospace">[B*T, C, H, W] → [B, T, C, H, W]</tspan></text>
+
+  <!-- conv_in bypass annotation -->
+  <rect x="328" y="284" width="100" height="24" rx="4" ry="4" class="box legend"/>
+  <text x="378" y="300" text-anchor="middle" class="small">bypasses conv_in</text>
 
   <!-- side labels -->
   <rect x="690" y="286" width="140" height="34" class="box legend"/>
