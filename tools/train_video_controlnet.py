@@ -151,7 +151,7 @@ def main():
             logger.info(f"  UNet trainable: {unet_trainable:,} / {unet_total:,} params ({100*unet_trainable/unet_total:.1f}%)")
 
         # Load the model
-        ctrlnet = ControlNetModel.from_unet(unet)
+        ctrlnet = ControlNetModel.from_unet(unet, use_multiscale_injection=args.use_multiscale_injection)
 
         # For mixed precision training we cast all non-trainable weights (vae, non-lora text_encoder and non-lora unet) to half-precision
         # as these weights are only used for inference, keeping weights in full precision is not required.
@@ -356,7 +356,8 @@ def main():
         # ── Early stopping ────────────────────────────────────────────────────
         # State file lives in output_dir (outside checkpoint-XXXXX dirs), so it
         # persists across --resume_from_checkpoint latest SLURM re-submissions.
-        EARLY_STOP_PATIENCE  = 8      # stop after 8 validations without improvement
+        EARLY_STOP_PATIENCE  = args.early_stop_patience   # 0 = disabled
+        EARLY_STOP_MIN_STEPS = args.early_stop_min_steps  # don't trigger before this step
         EARLY_STOP_MIN_DELTA = 0.005  # require at least 0.005 absolute LPIPS drop
         _es_state_path = os.path.join(args.output_dir, 'early_stop_state.json')
 
@@ -391,7 +392,12 @@ def main():
                 _s["patience_counter"] += 1
             with open(_es_state_path, 'w') as _f:
                 _json.dump(_s, _f, indent=2)
-            return _s["patience_counter"], _s["patience_counter"] >= EARLY_STOP_PATIENCE, \
+            _should_stop = (
+                EARLY_STOP_PATIENCE > 0
+                and _s["patience_counter"] >= EARLY_STOP_PATIENCE
+                and step >= EARLY_STOP_MIN_STEPS
+            )
+            return _s["patience_counter"], _should_stop, \
                    _s["best_metric"], _s["best_step"]
 
         # LPIPS model for Stage 2 perceptual quality metric
@@ -709,6 +715,22 @@ def main():
                                                                     torch_dtype=weight_dtype,
                                                                     )
                 pipeline.save_pretrained(args.output_dir)
+
+                # When early stopping is disabled (patience=0), promote the final
+                # checkpoint to best_checkpoint so eval scripts pick up the fully
+                # trained weights rather than any LPIPS-based intermediate.
+                if args.early_stop_patience == 0:
+                    _ckpts = sorted(
+                        [d for d in os.listdir(args.output_dir) if d.startswith("checkpoint-")],
+                        key=lambda x: int(x.split("-")[1])
+                    )
+                    if _ckpts:
+                        _src = os.path.join(args.output_dir, _ckpts[-1])
+                        _dst = os.path.join(args.output_dir, "best_checkpoint")
+                        if os.path.exists(_dst):
+                            shutil.rmtree(_dst)
+                        shutil.copytree(_src, _dst)
+                        logger.info(f"Early stopping disabled: promoted {_ckpts[-1]} → best_checkpoint")
 
                 # Run a final round of inference
                 logger.info("Running inference before terminating...")

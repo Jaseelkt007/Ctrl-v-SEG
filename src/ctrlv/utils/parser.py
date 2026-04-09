@@ -208,6 +208,27 @@ def parse_args():
     #     help="Number of images that should be generated during validation with `validation_prompt`.",
     # )
     parser.add_argument(
+        "--use_multiscale_injection",
+        action="store_true",
+        default=False,
+        help="Enable multi-scale semantic re-injection in ControlNet. "
+             "Must match the checkpoint being resumed (reinject checkpoints need this enabled).",
+    )
+    parser.add_argument(
+        "--early_stop_patience",
+        type=int,
+        default=8,
+        help="Number of consecutive validations without LPIPS improvement before stopping. "
+             "Set to 0 to disable early stopping.",
+    )
+    parser.add_argument(
+        "--early_stop_min_steps",
+        type=int,
+        default=0,
+        help="Minimum global steps before early stopping can trigger. "
+             "Useful when resuming or when new components (e.g. zero-init projectors) need warm-up.",
+    )
+    parser.add_argument(
         "--validation_steps",
         type=int,
         default=50,

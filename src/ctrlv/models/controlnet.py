@@ -68,6 +68,7 @@ class ControlNetModel(ControlNetModel_original): # (ModelMixin, ConfigMixin, Fro
         transformer_layers_per_block: Union[int, Tuple[int], Tuple[Tuple]] = 1,
         num_attention_heads: Union[int, Tuple[int]] = (5, 10, 20, 20),
         num_frames: int = 25,
+        use_multiscale_injection: bool = False,
     ):
         # calling the super class constructors without calling ControlNetModel_original's
         ModelMixin.__init__(self)
@@ -140,16 +141,17 @@ class ControlNetModel(ControlNetModel_original): # (ModelMixin, ConfigMixin, Fro
             padding=1,
         )
 
-        # Multi-scale semantic re-injection projectors.
-        # One per downsampling boundary (after blocks 0, 1, 2).
+        # Multi-scale semantic re-injection projectors (optional).
+        # Created only when use_multiscale_injection=True.
         # Zero-initialized: training starts from pretrained checkpoint behavior
         # and gradually learns the re-injection signal.
-        semantic_channels = in_channels // 2  # = 4
-        self.semantic_scale_projectors = nn.ModuleList([
-            zero_module(nn.Conv2d(semantic_channels, block_out_channels[0], kernel_size=3, padding=1)),  # 4→320
-            zero_module(nn.Conv2d(semantic_channels, block_out_channels[1], kernel_size=3, padding=1)),  # 4→640
-            zero_module(nn.Conv2d(semantic_channels, block_out_channels[2], kernel_size=3, padding=1)),  # 4→1280
-        ])
+        if use_multiscale_injection:
+            semantic_channels = in_channels // 2  # = 4
+            self.semantic_scale_projectors = nn.ModuleList([
+                zero_module(nn.Conv2d(semantic_channels, block_out_channels[0], kernel_size=3, padding=1)),  # 4→320
+                zero_module(nn.Conv2d(semantic_channels, block_out_channels[1], kernel_size=3, padding=1)),  # 4→640
+                zero_module(nn.Conv2d(semantic_channels, block_out_channels[2], kernel_size=3, padding=1)),  # 4→1280
+            ])
 
         # down
         output_channel = block_out_channels[0]
@@ -206,7 +208,8 @@ class ControlNetModel(ControlNetModel_original): # (ModelMixin, ConfigMixin, Fro
     @classmethod
     def from_unet(cls,
         unet: UNetSpatioTemporalConditionModel,
-        load_weights_from_unet: bool = True,):
+        load_weights_from_unet: bool = True,
+        use_multiscale_injection: bool = False,):
 
         ctrlnet = cls(
             in_channels=unet.config.in_channels,
@@ -219,6 +222,7 @@ class ControlNetModel(ControlNetModel_original): # (ModelMixin, ConfigMixin, Fro
             transformer_layers_per_block=unet.config.transformer_layers_per_block,
             num_attention_heads=unet.config.num_attention_heads,
             num_frames=unet.config.num_frames,
+            use_multiscale_injection=use_multiscale_injection,
         )
         unet_keys = set(unet.state_dict().keys())
         ctrl_keys = set(ctrlnet.state_dict().keys())
@@ -296,9 +300,8 @@ class ControlNetModel(ControlNetModel_original): # (ModelMixin, ConfigMixin, Fro
         sample = sample.flatten(0, 1)
         # control_cond: [batch, frames, channels, height, width] -> [batch * frames, channels, height, width]
         control_cond = control_cond.flatten(0, 1)
-        # Save original semantic latent [B*F, 4, H, W] before projection.
-        # Used for multi-scale re-injection after each downsampling block.
-        control_cond_original = control_cond
+        # Save original semantic latent for multi-scale re-injection (only when enabled).
+        control_cond_original = control_cond if self.config.use_multiscale_injection else None
         # Repeat the embeddings num_video_frames times
         # emb: [batch, channels] -> [batch * frames, channels]
         emb = emb.repeat_interleave(num_frames, dim=0)
@@ -314,6 +317,7 @@ class ControlNetModel(ControlNetModel_original): # (ModelMixin, ConfigMixin, Fro
 
         down_block_res_samples = (sample,)
         inject_idx = 0
+        _multiscale = self.config.use_multiscale_injection
         for i, downsample_block in enumerate(self.down_blocks):
             if hasattr(downsample_block, "has_cross_attention") and downsample_block.has_cross_attention:
                 sample, res_samples = downsample_block(
@@ -334,7 +338,7 @@ class ControlNetModel(ControlNetModel_original): # (ModelMixin, ConfigMixin, Fro
             # Re-inject fresh semantic conditioning after each block that has a downsampler.
             # Blocks 0, 1, 2 have downsamplers (is_final_block=False).
             # Block 3 (final) does not — no injection there.
-            if i < len(self.down_blocks) - 1:
+            if _multiscale and i < len(self.down_blocks) - 1:
                 semantic_rescaled = F.interpolate(
                     control_cond_original,
                     size=sample.shape[-2:],   # dynamically matches 12×44, 6×22, 3×11

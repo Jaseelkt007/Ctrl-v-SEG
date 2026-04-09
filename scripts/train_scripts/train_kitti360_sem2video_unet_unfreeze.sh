@@ -152,12 +152,15 @@ CUDA_LAUNCH_BLOCKING=1 accelerate launch \
     --bbox_dropout_prob 0.1 \
     --num_demo_samples 3 \
     --num_train_epochs 10 \
+    --max_train_steps 32700 \
     --use_segmentation \
     --num_inference_steps 30 \
     --train_H 192 \
     --train_W 704 \
     --dataloader_num_workers 8 \
-    # --resume_from_checkpoint latest \
+    --early_stop_patience 0 \
+    --use_multiscale_injection \
+    --resume_from_checkpoint latest \
     $( [ -n "$FINETUNED_SVD_PATH" ] && echo "--finetuned_svd_path $FINETUNED_SVD_PATH" )
 
 # ============================================================================
