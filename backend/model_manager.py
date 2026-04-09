@@ -23,7 +23,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 SEMANTIC_VAE_CHECKPOINT = '/usrhomes/s1492/vae_semantic/checkpoints/semantic_vae_native/best_model_with_dice_boundaryweight.pth'
 BASE_MODEL = 'stabilityai/stable-video-diffusion-img2vid-xt'
 STAGE1_CHECKPOINT_DIR = '/no_backups/s1492/Ctrl-V/checkpoints/kitti360_semantic_predict_vae'
-STAGE2_CHECKPOINT_DIR = '/no_backups/s1492/Ctrl-V/checkpoints/kitti360_sem2video_unet_unfreeze_reinject'
+STAGE2_CHECKPOINT_DIR = '/no_backups/s1492/Ctrl-V/checkpoints/kitti360_sem2video_unet_unfreeze'
 # STAGE2_CHECKPOINT_DIR = '/no_backups/s1492/Ctrl-V/checkpoints/kitti360_semantic2video_vae'
 DRN_DIR = '/usrhomes/s1492/drn'
 DRN_CHECKPOINT = '/usrhomes/s1492/drn/KITTI360_checkpoints/checkpoint_030.pth.tar'

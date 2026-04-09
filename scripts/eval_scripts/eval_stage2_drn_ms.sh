@@ -4,9 +4,8 @@
 #SBATCH --error=/no_backups/s1492/Ctrl-V/logs/eval_stage2_drn_ms_%j.err
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64G
-#SBATCH --gpus=rtx_a5000:1
-#SBATCH --partition=stud
-#SBATCH --qos=batch
+#SBATCH --gpus=1
+#SBATCH --partition=highperf
 #SBATCH --time=48:00:00
 
 # =============================================================================
@@ -64,10 +63,10 @@ nvidia-smi --query-gpu=name,memory.used,memory.free,memory.total --format=csv
 # Configuration  —  edit these variables to switch checkpoints / output dirs
 # ============================================================================
 
-CHECKPOINT_DIR="/no_backups/s1492/Ctrl-V/checkpoints/kitti360_sem2video_unet_unfreeze"
+CHECKPOINT_DIR="/no_backups/s1492/Ctrl-V/checkpoints/kitti360_sem2video_unet_unfreeze_reinject/checkpoint-32700"
 
 # All Phase 1 outputs go here.  Phase 2 uses:  ${OUTPUT_DIR}/CTRLV_STAGE2
-OUTPUT_DIR="/no_backups/s1492/Ctrl-V/outputs/eval_stage2_drn_ms_unet_unfreeze_withoutreinject"
+OUTPUT_DIR="/no_backups/s1492/Ctrl-V/outputs/eval_stage2_drn_ms_unet_unfreeze_with_reinject"
 
 # GT labels: drn_eval/CTRLV_STAGE2/val_labels.txt (static, checked into project)
 # Phase 1 reads this file directly via --drn_eval_dir; no separate argument needed.

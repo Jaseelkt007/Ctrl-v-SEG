@@ -270,7 +270,12 @@ def main():
     # Resolve checkpoint
     ckpt_dir = args.checkpoint_dir
     best_path = os.path.join(ckpt_dir, "best_checkpoint")
-    if os.path.exists(best_path):
+    if os.path.isdir(os.path.join(ckpt_dir, "control_net")):
+        # Passed directly to a step checkpoint (e.g. .../checkpoint-21300)
+        ckpt_path = ckpt_dir
+        step_tag = os.path.basename(ckpt_dir.rstrip("/"))
+        ckpt_step = step_tag.split("-")[1] if "-" in step_tag else step_tag
+    elif os.path.exists(best_path):
         ckpt_path = best_path
         ckpt_step = "best"
     else:
