@@ -1,0 +1,35 @@
+Stage 2 Evaluation Summary
+============================================================
+
+Checkpoint: step 96100
+Checkpoint dir: /no_backups/s1492/Ctrl-V/checkpoints/kitti360_semantic2video_vae
+Num samples: 150
+Clip length: 25
+Resolution: 192x704
+
+DRN Metrics (on Generated RGB):
+  mIoU:              23.20%
+  Pixel Accuracy:    67.63%
+  Mean Accuracy:     37.10%
+  FW-IoU:            52.29%
+
+Per-Class IoU (DRN):
+  road               70.66%
+  sidewalk           31.82%
+  building           56.74%
+  wall               17.08%
+  fence              21.54%
+  pole               12.09%
+  traffic light      0.00%
+  traffic sign       4.31%
+  vegetation         55.63%
+  terrain            40.84%
+  sky                55.11%
+  person             1.18%
+  rider              6.92%
+  car                40.61%
+  truck              23.49%
+  bus                0.00%
+  train              0.00%
+  motorcycle         2.05%
+  bicycle            0.75%

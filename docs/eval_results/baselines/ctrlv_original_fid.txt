@@ -1,0 +1,10 @@
+Ctrl-V (Original) FID Evaluation Summary
+============================================================
+
+Model           : Ctrl-V (original)
+Data dir        : /misc/data/public/kitti-360/CTRL_V_Semantic_to_video
+Frames evaluated: 4659
+Resolution      : 128x512
+
+Image Quality:
+  FID (Inception-v3): 92.2120

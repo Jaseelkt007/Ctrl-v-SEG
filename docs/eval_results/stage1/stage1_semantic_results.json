@@ -1,0 +1,206 @@
+{
+  "checkpoint_dir": "/no_backups/s1492/Ctrl-V/checkpoints/kitti360_semantic_predict_vae",
+  "checkpoint_step": "best",
+  "clip_groups": 19,
+  "total_frames": 475,
+  "confidence_weighted": true,
+  "miou": 0.3489973170438996,
+  "pixel_accuracy": 0.7800500259483014,
+  "mean_accuracy": 0.5305203184205945,
+  "fwiou": 0.6544118623465701,
+  "miou_unweighted": 0.3425565180914503,
+  "iou_per_class": {
+    "road": 0.8522296406916055,
+    "sidewalk": 0.484183158318369,
+    "building": 0.6864360966169016,
+    "wall": 0.31189664665709627,
+    "fence": 0.44715472639887804,
+    "pole": 0.09892073260703957,
+    "traffic light": null,
+    "traffic sign": 0.13065371130721212,
+    "vegetation": 0.6567565118387627,
+    "terrain": 0.3342383093280404,
+    "sky": 0.7334321604336597,
+    "person": 0.05635586401299705,
+    "rider": 0.0,
+    "car": 0.4378631270356355,
+    "truck": 0.0,
+    "bus": null,
+    "train": null,
+    "motorcycle": 0.004839070412296111,
+    "bicycle": null
+  },
+  "per_clip": [
+    {
+      "group_idx": 0,
+      "folder_name": "2013_05_28_drive_0000_sync_00",
+      "sequence": "2013_05_28_drive_0000_sync",
+      "start_frame": 447,
+      "end_frame": 471,
+      "miou": 0.3203942045311341,
+      "pixel_accuracy": 0.6072623204736904
+    },
+    {
+      "group_idx": 1,
+      "folder_name": "2013_05_28_drive_0000_sync_01",
+      "sequence": "2013_05_28_drive_0000_sync",
+      "start_frame": 2768,
+      "end_frame": 2792,
+      "miou": 0.2765960578909943,
+      "pixel_accuracy": 0.5649384167316597
+    },
+    {
+      "group_idx": 2,
+      "folder_name": "2013_05_28_drive_0000_sync_02",
+      "sequence": "2013_05_28_drive_0000_sync",
+      "start_frame": 3295,
+      "end_frame": 3319,
+      "miou": 0.6467850574657873,
+      "pixel_accuracy": 0.8668049923964266
+    },
+    {
+      "group_idx": 3,
+      "folder_name": "2013_05_28_drive_0002_sync_00",
+      "sequence": "2013_05_28_drive_0002_sync",
+      "start_frame": 4452,
+      "end_frame": 4476,
+      "miou": 0.22059806588063965,
+      "pixel_accuracy": 0.5565281305740912
+    },
+    {
+      "group_idx": 4,
+      "folder_name": "2013_05_28_drive_0002_sync_01",
+      "sequence": "2013_05_28_drive_0002_sync",
+      "start_frame": 15261,
+      "end_frame": 15285,
+      "miou": 0.3848586058794356,
+      "pixel_accuracy": 0.7542228335460114
+    },
+    {
+      "group_idx": 5,
+      "folder_name": "2013_05_28_drive_0003_sync_00",
+      "sequence": "2013_05_28_drive_0003_sync",
+      "start_frame": 68,
+      "end_frame": 92,
+      "miou": 0.2644440092456557,
+      "pixel_accuracy": 0.8392523761666846
+    },
+    {
+      "group_idx": 6,
+      "folder_name": "2013_05_28_drive_0004_sync_00",
+      "sequence": "2013_05_28_drive_0004_sync",
+      "start_frame": 2975,
+      "end_frame": 2999,
+      "miou": 0.36405243848522406,
+      "pixel_accuracy": 0.7669945688241142
+    },
+    {
+      "group_idx": 7,
+      "folder_name": "2013_05_28_drive_0004_sync_01",
+      "sequence": "2013_05_28_drive_0004_sync",
+      "start_frame": 4442,
+      "end_frame": 4466,
+      "miou": 0.5201654622659201,
+      "pixel_accuracy": 0.8026728561787793
+    },
+    {
+      "group_idx": 8,
+      "folder_name": "2013_05_28_drive_0005_sync_00",
+      "sequence": "2013_05_28_drive_0005_sync",
+      "start_frame": 4849,
+      "end_frame": 4873,
+      "miou": 0.5013623467911101,
+      "pixel_accuracy": 0.7584402937749409
+    },
+    {
+      "group_idx": 9,
+      "folder_name": "2013_05_28_drive_0006_sync_00",
+      "sequence": "2013_05_28_drive_0006_sync",
+      "start_frame": 158,
+      "end_frame": 182,
+      "miou": 0.3091971178334458,
+      "pixel_accuracy": 0.7461785875347198
+    },
+    {
+      "group_idx": 10,
+      "folder_name": "2013_05_28_drive_0006_sync_01",
+      "sequence": "2013_05_28_drive_0006_sync",
+      "start_frame": 2351,
+      "end_frame": 2375,
+      "miou": 0.4137362169005608,
+      "pixel_accuracy": 0.8044205692023934
+    },
+    {
+      "group_idx": 11,
+      "folder_name": "2013_05_28_drive_0006_sync_02",
+      "sequence": "2013_05_28_drive_0006_sync",
+      "start_frame": 9285,
+      "end_frame": 9309,
+      "miou": 0.4064774651398646,
+      "pixel_accuracy": 0.7783075521882223
+    },
+    {
+      "group_idx": 12,
+      "folder_name": "2013_05_28_drive_0007_sync_00",
+      "sequence": "2013_05_28_drive_0007_sync",
+      "start_frame": 63,
+      "end_frame": 87,
+      "miou": 0.32690150723112854,
+      "pixel_accuracy": 0.945271038373856
+    },
+    {
+      "group_idx": 13,
+      "folder_name": "2013_05_28_drive_0009_sync_00",
+      "sequence": "2013_05_28_drive_0009_sync",
+      "start_frame": 849,
+      "end_frame": 873,
+      "miou": 0.49602520794947197,
+      "pixel_accuracy": 0.752336407064565
+    },
+    {
+      "group_idx": 14,
+      "folder_name": "2013_05_28_drive_0009_sync_01",
+      "sequence": "2013_05_28_drive_0009_sync",
+      "start_frame": 4551,
+      "end_frame": 4575,
+      "miou": 0.413036686528095,
+      "pixel_accuracy": 0.8566001500037457
+    },
+    {
+      "group_idx": 15,
+      "folder_name": "2013_05_28_drive_0009_sync_02",
+      "sequence": "2013_05_28_drive_0009_sync",
+      "start_frame": 5241,
+      "end_frame": 5265,
+      "miou": 0.3942085269753708,
+      "pixel_accuracy": 0.7615756939238374
+    },
+    {
+      "group_idx": 16,
+      "folder_name": "2013_05_28_drive_0009_sync_03",
+      "sequence": "2013_05_28_drive_0009_sync",
+      "start_frame": 6347,
+      "end_frame": 6371,
+      "miou": 0.3892358284012462,
+      "pixel_accuracy": 0.7062935875150403
+    },
+    {
+      "group_idx": 17,
+      "folder_name": "2013_05_28_drive_0010_sync_00",
+      "sequence": "2013_05_28_drive_0010_sync",
+      "start_frame": 1941,
+      "end_frame": 1965,
+      "miou": 0.5310681144723817,
+      "pixel_accuracy": 0.9030060407567416
+    },
+    {
+      "group_idx": 18,
+      "folder_name": "2013_05_28_drive_0010_sync_01",
+      "sequence": "2013_05_28_drive_0010_sync",
+      "start_frame": 2668,
+      "end_frame": 2692,
+      "miou": 0.3707191349976165,
+      "pixel_accuracy": 0.7553137867517614
+    }
+  ]
+}

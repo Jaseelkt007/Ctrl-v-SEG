@@ -1,0 +1,11 @@
+SVS-GAN FVD Evaluation Summary
+============================================================
+
+Model           : SVS-GAN
+SVS output dir  : /data/public/kitti-360/Kitti360_512_g1_DP45_DPDisc/val_latest
+Clips evaluated : 482
+Clip length     : 25
+Resolution      : 128x512
+
+Video Quality:
+  FVD-I3D (cdfvd/I3D): 176.8932

@@ -1,0 +1,45 @@
+Stage 2 Evaluation Summary
+============================================================
+
+Checkpoint step : 32700
+Checkpoint dir  : /no_backups/s1492/Ctrl-V/checkpoints/kitti360_sem2video_unet_unfreeze
+Dataset         : kitti360 (val, non-overlapping)
+Num samples     : 487
+Clip length     : 25
+Resolution      : 192x704
+
+DRN Metrics (Generated RGB → Semantic):
+  mIoU              : 39.17%
+  Pixel Accuracy    : 85.34%
+  Mean Accuracy     : 50.88%
+  FW-IoU            : 75.31%
+
+Image Quality:
+  FID (Inception-v3): 21.9122
+  LPIPS (AlexNet)   : 0.3569 ± 0.0547
+  SSIM              : 0.4426 ± 0.1207
+  PSNR              : 14.6185 ± 3.4743 dB
+
+Video Quality (FVD):
+  FVD-I3D (cdfvd/I3D)       : 255.2064
+
+Per-Class IoU (DRN):
+  road               85.17%
+  sidewalk           55.20%
+  building           75.25%
+  wall               47.63%
+  fence              37.74%
+  pole               25.67%
+  traffic light      0.00%
+  traffic sign       30.99%
+  vegetation         80.62%
+  terrain            59.06%
+  sky                84.37%
+  person             22.92%
+  rider              9.88%
+  car                84.29%
+  truck              29.40%
+  bus                7.34%
+  train              0.32%
+  motorcycle         5.17%
+  bicycle            3.15%

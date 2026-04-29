@@ -1,0 +1,106 @@
+Stage 1 Semantic Evaluation Report  (19-Clip Set)
+============================================================
+Evaluation Date   : 2026-04-03 01:28:45
+Checkpoint Dir    : /no_backups/s1492/Ctrl-V/checkpoints/kitti360_semantic_predict_vae
+Checkpoint Step   : best
+
+------------------------------------------------------------
+Evaluation Protocol
+------------------------------------------------------------
+Clip Set          : drn_eval/CTRLV_STAGE2/val_labels.txt  (same 19 clips as Stage 2)
+Frame Count       : 19 groups × 25 = 475 frames
+Resolution        : 192×704
+Inference Steps   : 30
+Guidance Scale    : 3.0 – 7.0
+Confidence Weight : ON
+
+------------------------------------------------------------
+Clip Groups (19 total)
+------------------------------------------------------------
+   #  Sequence                                  Frames
+   0  2013_05_28_drive_0000_sync                0000000447 – 0000000471
+   1  2013_05_28_drive_0000_sync                0000002768 – 0000002792
+   2  2013_05_28_drive_0000_sync                0000003295 – 0000003319
+   3  2013_05_28_drive_0002_sync                0000004452 – 0000004476
+   4  2013_05_28_drive_0002_sync                0000015261 – 0000015285
+   5  2013_05_28_drive_0003_sync                0000000068 – 0000000092
+   6  2013_05_28_drive_0004_sync                0000002975 – 0000002999
+   7  2013_05_28_drive_0004_sync                0000004442 – 0000004466
+   8  2013_05_28_drive_0005_sync                0000004849 – 0000004873
+   9  2013_05_28_drive_0006_sync                0000000158 – 0000000182
+  10  2013_05_28_drive_0006_sync                0000002351 – 0000002375
+  11  2013_05_28_drive_0006_sync                0000009285 – 0000009309
+  12  2013_05_28_drive_0007_sync                0000000063 – 0000000087
+  13  2013_05_28_drive_0009_sync                0000000849 – 0000000873
+  14  2013_05_28_drive_0009_sync                0000004551 – 0000004575
+  15  2013_05_28_drive_0009_sync                0000005241 – 0000005265
+  16  2013_05_28_drive_0009_sync                0000006347 – 0000006371
+  17  2013_05_28_drive_0010_sync                0000001941 – 0000001965
+  18  2013_05_28_drive_0010_sync                0000002668 – 0000002692
+
+------------------------------------------------------------
+Overall Results
+------------------------------------------------------------
+mIoU (confidence-weighted)      : 34.90%
+mIoU (unweighted)                    : 34.26%
+Pixel Accuracy                       : 78.01%
+Mean Accuracy                        : 53.05%
+FW-IoU                               : 65.44%
+
+------------------------------------------------------------
+Per-Class IoU
+------------------------------------------------------------
+   ID  Class              IoU (%)
+ ----  ----------------  --------
+    0  road                 85.22
+    1  sidewalk             48.42
+    2  building             68.64
+    3  wall                 31.19
+    4  fence                44.72
+    5  pole                  9.89
+    6  traffic light        n/a   (absent)
+    7  traffic sign         13.07
+    8  vegetation           65.68
+    9  terrain              33.42
+   10  sky                  73.34
+   11  person                5.64
+   12  rider                 0.00
+   13  car                  43.79
+   14  truck                 0.00
+   15  bus                  n/a   (absent)
+   16  train                n/a   (absent)
+   17  motorcycle            0.48
+   18  bicycle              n/a   (absent)
+
+ mIoU = nanmean over 15 non-NaN classes = 34.90%
+
+------------------------------------------------------------
+Per-Clip mIoU
+------------------------------------------------------------
+   #  Folder                                              mIoU    PixAcc
+   0  2013_05_28_drive_0000_sync_00                     32.04%    60.73%
+   1  2013_05_28_drive_0000_sync_01                     27.66%    56.49%
+   2  2013_05_28_drive_0000_sync_02                     64.68%    86.68%
+   3  2013_05_28_drive_0002_sync_00                     22.06%    55.65%
+   4  2013_05_28_drive_0002_sync_01                     38.49%    75.42%
+   5  2013_05_28_drive_0003_sync_00                     26.44%    83.93%
+   6  2013_05_28_drive_0004_sync_00                     36.41%    76.70%
+   7  2013_05_28_drive_0004_sync_01                     52.02%    80.27%
+   8  2013_05_28_drive_0005_sync_00                     50.14%    75.84%
+   9  2013_05_28_drive_0006_sync_00                     30.92%    74.62%
+  10  2013_05_28_drive_0006_sync_01                     41.37%    80.44%
+  11  2013_05_28_drive_0006_sync_02                     40.65%    77.83%
+  12  2013_05_28_drive_0007_sync_00                     32.69%    94.53%
+  13  2013_05_28_drive_0009_sync_00                     49.60%    75.23%
+  14  2013_05_28_drive_0009_sync_01                     41.30%    85.66%
+  15  2013_05_28_drive_0009_sync_02                     39.42%    76.16%
+  16  2013_05_28_drive_0009_sync_03                     38.92%    70.63%
+  17  2013_05_28_drive_0010_sync_00                     53.11%    90.30%
+  18  2013_05_28_drive_0010_sync_01                     37.07%    75.53%
+
+------------------------------------------------------------
+Output Paths
+------------------------------------------------------------
+Report            : /no_backups/s1492/Ctrl-V/outputs/eval_stage1_semantic_new/eval_report.txt
+JSON              : /no_backups/s1492/Ctrl-V/outputs/eval_stage1_semantic_new/eval_results.json
+Confusion matrix  : /no_backups/s1492/Ctrl-V/outputs/eval_stage1_semantic_new/confusion_matrix.npy  /  .png
