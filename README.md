@@ -1,7 +1,7 @@
 # Ctrl-V-Seg: Semantic-Conditioned Autonomous-Vehicle Video Generation
 
 **Ctrl-V-Seg** is a two-stage video diffusion system for autonomous-vehicle scenes on KITTI-360.
-Instead of conditioning generation on bounding-box layouts (as in the original Ctrl-V), we condition
+Instead of conditioning generation on bounding-box layouts (as in the original Ctrl-V , where they encode control signals on RGB VAE), we condition
 on **dense semantic segmentation maps** at every pixel, producing tighter scene control and
 photorealistic rollouts that are directly evaluable with off-the-shelf segmentation models.
 
